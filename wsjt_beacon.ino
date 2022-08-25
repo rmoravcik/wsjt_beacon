@@ -59,7 +59,7 @@ constexpr uint16_t WSPR_INTERVAL = 683;
 constexpr uint8_t SYMBOL_COUNT = WSPR_SYMBOL_COUNT;
 constexpr uint32_t CORRECTION = 0;                    // Change this for your ref osc
 
-#define GPS_PPS_PIN       2
+#define GPS_PPS_PIN      10
 
 #define TX_LED_PIN       25
 #define SYNC_LED_PIN     13
@@ -72,7 +72,7 @@ constexpr uint32_t CORRECTION = 0;                    // Change this for your re
 #define SCREEN_HEIGHT    64
 
 #define OLED_RESET       -1
-#define SCREEN_ADDRESS 0x3D
+#define SCREEN_ADDRESS 0x78
 
 // Global variables
 Si5351 si5351;
@@ -81,7 +81,23 @@ TinyGPS gps;
 ClickEncoder encoder(ENC_A_PIN, ENC_B_PIN, ENC_BUTTON_PIN, 4);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-uint64_t freq = 10140200UL;                // Change this
+uint64_t freqs[12] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+   70091000UL,
+  144489000UL
+};
+
+uint8_t sel_freq = 4;
+
 char call[13] = "OK8RM";                   // Change this
 char loc[7] = "JN79LT";                    // Change this
 uint8_t dbm = 30;
@@ -111,7 +127,7 @@ void encode(uint8_t * buf)
   // Now do the rest of the message
   for (i = 0; i < SYMBOL_COUNT; i++)
   {
-    si5351.set_freq((freq * 100) + (buf[i] * TONE_SPACING), SI5351_CLK0);
+    si5351.set_freq((freqs[sel_freq] * 100) + (buf[i] * TONE_SPACING), SI5351_CLK0);
     while(millis() < timer_expire);
     timer_expire = millis() + WSPR_INTERVAL;
   }
@@ -147,6 +163,46 @@ void ppsInterrupt()
   
 }
 
+void scan_i2c(void)
+{
+  byte error, address;
+  int nDevices;
+ 
+  Serial.println("Scanning...");
+ 
+  nDevices = 0;
+  for(address = 1; address < 127; address++ )
+  {
+    // The i2c_scanner uses the return value of
+    // the Write.endTransmisstion to see if
+    // a device did acknowledge to the address.
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+ 
+    if (error == 0)
+    {
+      Serial.print("I2C device found at address 0x");
+      if (address<16)
+        Serial.print("0");
+      Serial.print(address,HEX);
+      Serial.println("  !");
+ 
+      nDevices++;
+    }
+    else if (error==4)
+    {
+      Serial.print("Unknown error at address 0x");
+      if (address<16)
+        Serial.print("0");
+      Serial.println(address,HEX);
+    }    
+  }
+  if (nDevices == 0)
+    Serial.println("No I2C devices found\n");
+  else
+    Serial.println("done\n");
+}
+
 void setup()
 {
   // Use the Arduino's on-board LED as a keying indicator.
@@ -159,11 +215,18 @@ void setup()
   pinMode(GPS_PPS_PIN, INPUT_PULLUP);
 
   Serial.begin(115200);
-  Serial1.begin(4800);
-  Serial.println("Waiting for GPS time ...");
 
+  Serial.println("GPS Serial setup ...");
+  Serial1.begin(9600);
+
+  Wire.begin();
+
+  scan_i2c();
+
+  Serial.println("GPS 1PPS Interrupt setup...");
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), ppsInterrupt, RISING);
 
+  Serial.println("SSD1306 Initialization...");
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
   {
@@ -173,32 +236,54 @@ void setup()
 
   // Clear the buffer
   display.clearDisplay();
+  display.display();
 
+  Serial.println("Si5351 Initialization...");
   // Initialize the Si5351
   // Change the 2nd parameter in init if using a ref osc other
   // than 25 MHz
   si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, CORRECTION);
 
   // Set CLK0 output
-  si5351.set_freq(freq * 100, SI5351_CLK0);
+  si5351.set_freq(freqs[sel_freq] * 100, SI5351_CLK0);
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA); // Set for max power
   si5351.set_clock_pwr(SI5351_CLK0, 0); // Disable the clock initially
 
   jtencode.wspr_encode(call, loc, dbm, tx_buffer_1);
   jtencode.wspr_encode("OK8RM/X", "JN79LT", 23, tx_buffer_2);
 
+  display.drawTriangle(8, 0, 0, 8, 8, 8, SSD1306_WHITE);
+  display.fillTriangle(4, 4, 0, 8, 4, 8, SSD1306_WHITE);
+  display.drawRect(110, 0, 16, 8, SSD1306_WHITE);
+  display.drawRect(126, 2, 2, 4, SSD1306_WHITE);
+
   // Start at top-left corner
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(0, 0);
-  display.println(F("Hello, world!"));
+  display.setCursor(48, 0);
+  display.println("20:59");
+  display.setCursor(0, 24);
+  display.setTextSize(2);
+  display.println("  14.0936");
+  display.setCursor(0, 56);
+  display.setTextSize(1);
+  display.println("OK8RM");
+  display.setCursor(90, 56);
+  display.setTextSize(1);
+  display.println("JN79LT");
+  display.display();
+
+  Serial.println("Done...");
 }
  
 void loop()
 {
+  Serial1.println("Hello");
   if (Serial1.available())
   {
     processSyncMessage();
+    Serial.print("Satellites: ");
+    Serial.println(gps.satellites());
   }
   
   if (timeStatus() == timeSet)
