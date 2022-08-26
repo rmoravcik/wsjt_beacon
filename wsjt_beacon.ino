@@ -7,8 +7,29 @@
 #include <TinyGPS.h>
 #include <ClickEncoder.h>
 #include <Adafruit_SSD1306.h>
+#include <EEPROM.h>
 
 #include "config.h"
+
+#define DEBUG_TRACES     0
+
+#if DEBUG_TRACES
+#define DEBUG(x)    Serial.print(x)
+#define DEBUGLN(x)  Serial.println(x)
+#else
+#define DEBUG(x)
+#define DEBUGLN(x)
+#endif
+
+#define EEPROM_MODE      0
+#define EEPROM_FREQUENCY 1
+
+enum screen {
+  SCREEN_STATUS = 0,
+  SCREEN_SET_FREQUENCY,
+  SCREEN_GPS_STATUS,
+  SCREEN_COUNT
+};
 
 enum mode {
   MODE_JT9 = 0,
@@ -143,9 +164,12 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 uint8_t sel_freq = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
+uint8_t cur_screen = SCREEN_STATUS;
+bool edit_mode = false;
 constexpr uint32_t CORRECTION    = 0;                   // Change this for your ref osc
 
 uint8_t tx_buffer[255];
+int16_t encoder_prev_value = 0;
 
 // Loop through the string, transmitting one character at a time.
 static void encode(void)
@@ -258,9 +282,81 @@ static void display_test(void)
   display.display();
 }
 
-void ppsInterrupt()
+static void display_header(const char *text)
+{
+  display.setCursor(24, 0);
+  display.setTextSize(2);
+  display.println(text);
+  display.display();
+}
+
+static void switch_screen(void)
+{
+  if (!edit_mode)
+  {
+    int16_t encoder_cur_value = encoder.getValue();
+  
+    if (encoder_prev_value != encoder_cur_value)
+    {
+      if (encoder_cur_value > encoder_prev_value)
+      {
+        cur_screen++;
+        if (cur_screen == SCREEN_COUNT)
+        {
+          cur_screen = SCREEN_STATUS;
+        }
+      }
+      else
+      {
+        if (cur_screen == SCREEN_STATUS)
+        {
+          cur_screen = SCREEN_COUNT;
+        }
+        cur_screen--;
+      }
+      encoder_prev_value = encoder_cur_value;
+    }  
+  }
+}
+
+static void show_status_screen(void)
+{
+  display_test();
+}
+
+static void show_set_frequency_screen(void)
+{
+  display.clearDisplay();
+  display_header("Frequency");
+}
+
+static void show_gps_status_screen(void)
+{
+  display.clearDisplay();
+  display_header("GPS Status");
+
+  DEBUG("Satellites: ");
+  DEBUGLN(gps.satellites());
+}
+
+void pps_interrupt()
 {
   
+}
+
+static void read_configuration(void)
+{
+  cur_mode = EEPROM.read(EEPROM_MODE);
+  if (cur_mode > MODE_COUNT)
+  {
+    cur_mode = MODE_WSPR;
+  }
+
+  sel_freq = EEPROM.read(EEPROM_FREQUENCY);
+  if (sel_freq > BAND_COUNT)
+  {
+    sel_freq = BAND_20M;
+  } 
 }
 
 void setup()
@@ -268,18 +364,21 @@ void setup()
   Serial.begin(115200);
   Wire.begin();
 
-  Serial.println("NEO-6M setup...");
+  DEBUGLN("Reading EEPROM configuration...");
+  read_configuration();
+
+  DEBUGLN("NEO-6M setup...");
   Serial1.begin(9600);
 
-  Serial.println("NEO-6M 1PPS IRQ setup...");
+  DEBUGLN("NEO-6M 1PPS IRQ setup...");
   pinMode(GPS_PPS_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), ppsInterrupt, RISING);
+  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
 
-  Serial.println("SSD1306 setup...");
+  DEBUGLN("SSD1306 setup...");
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_I2C_ADDRESS))
   {
-    Serial.println("ERROR: SSD1306 allocation failed!");
+    DEBUGLN("ERROR: SSD1306 allocation failed!");
     for(;;);
   }
 
@@ -287,7 +386,7 @@ void setup()
   display.clearDisplay();
   display.display();
 
-  Serial.println("Si5351 setup...");
+  DEBUGLN("Si5351 setup...");
   // Initialize the Si5351
   // Change the 2nd parameter in init if using a ref osc other than 25 MHz
   si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, CORRECTION);
@@ -301,9 +400,7 @@ void setup()
 
   set_tx_buffer();
 
-  display_test();
-
-  Serial.println("Done...");
+  DEBUGLN("Done...");
 }
  
 void loop()
@@ -311,8 +408,6 @@ void loop()
   if (Serial1.available())
   {
     processSyncMessage();
-    Serial.print("Satellites: ");
-    Serial.println(gps.satellites());
   }
   
   if (timeStatus() == timeSet)
@@ -332,5 +427,20 @@ void loop()
   {
     encode();
     delay(1000);
+  }
+
+  switch_screen();
+
+  switch (cur_screen)
+  {
+    case SCREEN_SET_FREQUENCY:
+      show_set_frequency_screen();
+      break;
+    case SCREEN_GPS_STATUS:
+      show_gps_status_screen();
+      break;
+    default:
+      show_status_screen();
+      break;
   }
 }
