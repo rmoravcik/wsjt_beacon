@@ -13,7 +13,9 @@
 enum mode {
   MODE_JT9 = 0,
   MODE_JT65,
+/*  
   MODE_JT4,
+*/
   MODE_WSPR,
 /*
   MODE_FSQ_2,
@@ -45,10 +47,52 @@ struct mode_param {
   uint16_t symbol_count;
   uint16_t tone_spacing;
   uint16_t tone_delay;
-  uint64_t *freqs;
+  uint32_t *freqs;
 };
 
-const uint64_t wspr_freqs[BAND_COUNT] = {
+const uint32_t jt9_freqs[BAND_COUNT] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+  144489000UL
+};
+
+const uint32_t jt65_freqs[BAND_COUNT] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+  144489000UL
+};
+
+const uint32_t wspr_freqs[BAND_COUNT] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+  144489000UL
+};
+
+const uint32_t ft8_freqs[BAND_COUNT] = {
     1836600UL,
     3568600UL,
     7038600UL,
@@ -63,9 +107,11 @@ const uint64_t wspr_freqs[BAND_COUNT] = {
 };
 
 const struct mode_param mode_params[MODE_COUNT] {
- { "JT9",  JT9_SYMBOL_COUNT,  174, 576, NULL       },
- { "JT65", JT65_SYMBOL_COUNT, 269, 371, NULL       },
+ { "JT9",  JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
+ { "JT65", JT65_SYMBOL_COUNT, 269, 371, jt65_freqs },
+/*
  { "JT4",  JT4_SYMBOL_COUNT,  437, 229, NULL       },
+*/
  { "WSPR", WSPR_SYMBOL_COUNT, 146, 683, wspr_freqs },
 /*
  { "FSQ2", 0,                 879, 500, NULL       },
@@ -73,19 +119,18 @@ const struct mode_param mode_params[MODE_COUNT] {
  { "FSQ4", 0,                 879, 222, NULL       },
  { "FSQ5", 0,                 879, 167, NULL       },
 */
- { "FT8",  FT8_SYMBOL_COUNT,  628, 159, NULL       }
+ { "FT8",  FT8_SYMBOL_COUNT,  628, 159, ft8_freqs  }
 };
 
-#define GPS_PPS_PIN      10
+#define GPS_PPS_PIN           10
+#define SYNC_LED_PIN          12
 
-#define SYNC_LED_PIN     12
+#define ENC_A_PIN              3
+#define ENC_B_PIN              2
+#define ENC_BUTTON_PIN         4
 
-#define ENC_A_PIN         3
-#define ENC_B_PIN         2
-#define ENC_BUTTON_PIN    4
-
-#define SCREEN_WIDTH    128
-#define SCREEN_HEIGHT    64
+#define SCREEN_WIDTH         128
+#define SCREEN_HEIGHT         64
 
 #define SSD1306_I2C_ADDRESS 0x3C
 
@@ -146,9 +191,11 @@ static void set_tx_buffer()
   case MODE_JT65:
     jtencode.jt65_encode(message, tx_buffer);
     break;
+/*
   case MODE_JT4:
     jtencode.jt4_encode(message, tx_buffer);
     break;
+*/
   case MODE_WSPR:
     jtencode.wspr_encode(call, loc, dbm, tx_buffer);
     break;
