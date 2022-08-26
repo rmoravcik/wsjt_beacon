@@ -1,50 +1,4 @@
 // Based on Si5351_WSPR_2560.ino by Jason Milldrum NT7S.
-//
-// Si5351_WSPR
-//
-// Simple WSPR beacon for Arduino Uno, with the Etherkit Si5351A Breakout
-// Board by Jason Milldrum NT7S.
-// 
-// Original code based on Feld Hell beacon for Arduino by Mark 
-// Vandewettering K6HX, adapted for the Si5351A by Robert 
-// Liesenfeld AK6L <ak6l@ak6l.org>.  Timer setup
-// code by Thomas Knutsen LA3PNA.
-//
-// Time code adapted from the TimeSerial.ino example from the Time library.
-
-// Hardware Requirements
-// ---------------------
-// This firmware should be able to run on most Arduino microcontrollers, since it solely relies
-// on the millis() function for timing.
-//
-// Required Libraries
-// ------------------
-// Etherkit Si5351 (Library Manager)
-// Etherkit JTEncode (Library Manager)
-// Time (Library Manager)
-// Wire (Arduino Standard Library)
-//
-// License
-// -------
-// Permission is hereby granted, free of charge, to any person obtaining
-// a copy of this software and associated documentation files (the
-// "Software"), to deal in the Software without restriction, including
-// without limitation the rights to use, copy, modify, merge, publish,
-// distribute, sublicense, and/or sell copies of the Software, and to
-// permit persons to whom the Software is furnished to do so, subject
-// to the following conditions:
-// 
-// The above copyright notice and this permission notice shall be
-// included in all copies or substantial portions of the Software.
-// 
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-// EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-// IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
-// ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
-// CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-//
 
 #include <si5351.h>
 #include <JTEncode.h>
@@ -54,34 +8,47 @@
 #include <ClickEncoder.h>
 #include <Adafruit_SSD1306.h>
 
-constexpr uint8_t TONE_SPACING = 146;                 // ~1.46 Hz
-constexpr uint16_t WSPR_INTERVAL = 683;
-constexpr uint8_t SYMBOL_COUNT = WSPR_SYMBOL_COUNT;
-constexpr uint32_t CORRECTION = 0;                    // Change this for your ref osc
+#include "config.h"
 
-#define GPS_PPS_PIN      10
+enum mode {
+  MODE_JT9 = 0,
+  MODE_JT65,
+  MODE_JT4,
+  MODE_WSPR,
+/*
+  MODE_FSQ_2,
+  MODE_FSQ_3,
+  MODE_FSQ_4_5,
+  MODE_FSQ_6,
+*/
+  MODE_FT8,
+  MODE_COUNT
+};
 
-#define TX_LED_PIN       25
-#define SYNC_LED_PIN     13
+enum band {
+  BAND_160M = 0,
+  BAND_80M,
+  BAND_40M,
+  BAND_30M,
+  BAND_20M,
+  BAND_17M,
+  BAND_15M,
+  BAND_12M,
+  BAND_10M,
+  BAND_6M,
+  BAND_2M,
+  BAND_COUNT
+};
 
-#define ENC_A_PIN        19
-#define ENC_B_PIN        18
-#define ENC_BUTTON_PIN   20
+struct mode_param {
+  const char mode_name[5];
+  uint16_t symbol_count;
+  uint16_t tone_spacing;
+  uint16_t tone_delay;
+  uint64_t *freqs;
+};
 
-#define SCREEN_WIDTH    128
-#define SCREEN_HEIGHT    64
-
-#define OLED_RESET       -1
-#define SCREEN_ADDRESS 0x78
-
-// Global variables
-Si5351 si5351;
-JTEncode jtencode;
-TinyGPS gps;
-ClickEncoder encoder(ENC_A_PIN, ENC_B_PIN, ENC_BUTTON_PIN, 4);
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-
-uint64_t freqs[12] = {
+const uint64_t wspr_freqs[BAND_COUNT] = {
     1836600UL,
     3568600UL,
     7038600UL,
@@ -92,52 +59,114 @@ uint64_t freqs[12] = {
    24924600UL,
    28124600UL,
    50293000UL,
-   70091000UL,
   144489000UL
 };
 
-uint8_t sel_freq = 4;
+const struct mode_param mode_params[MODE_COUNT] {
+ { "JT9",  JT9_SYMBOL_COUNT,  174, 576, NULL       },
+ { "JT65", JT65_SYMBOL_COUNT, 269, 371, NULL       },
+ { "JT4",  JT4_SYMBOL_COUNT,  437, 229, NULL       },
+ { "WSPR", WSPR_SYMBOL_COUNT, 146, 683, wspr_freqs },
+/*
+ { "FSQ2", 0,                 879, 500, NULL       },
+ { "FSQ3", 0,                 879, 333, NULL       },
+ { "FSQ4", 0,                 879, 222, NULL       },
+ { "FSQ5", 0,                 879, 167, NULL       },
+*/
+ { "FT8",  FT8_SYMBOL_COUNT,  628, 159, NULL       }
+};
 
-char call[13] = "OK8RM";                   // Change this
-char loc[7] = "JN79LT";                    // Change this
-uint8_t dbm = 30;
-uint8_t tx_buffer_1[SYMBOL_COUNT];
-uint8_t tx_buffer_2[SYMBOL_COUNT];
-uint32_t timer_expire = UINT32_MAX;
+#define GPS_PPS_PIN      10
 
-// Offset hours from gps time (UTC)
-const int offset = 1;   // Central European Time
+#define SYNC_LED_PIN     12
 
-// Global variables used in ISRs
-volatile bool proceed = false;
- 
+#define ENC_A_PIN         3
+#define ENC_B_PIN         2
+#define ENC_BUTTON_PIN    4
+
+#define SCREEN_WIDTH    128
+#define SCREEN_HEIGHT    64
+
+#define SSD1306_I2C_ADDRESS 0x3C
+
+// Global variables
+Si5351 si5351;
+JTEncode jtencode;
+TinyGPS gps;
+ClickEncoder encoder(ENC_A_PIN, ENC_B_PIN, ENC_BUTTON_PIN, 4);
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+uint8_t sel_freq = BAND_20M;
+uint8_t cur_mode = MODE_WSPR;
+constexpr uint32_t CORRECTION    = 0;                   // Change this for your ref osc
+
+uint8_t tx_buffer[255];
+
 // Loop through the string, transmitting one character at a time.
-void encode(uint8_t * buf)
+static void encode(void)
 {
   uint8_t i;
 
-  // jtencode.wspr_encode(call, loc, dbm, tx_buffer_1);
-
-  timer_expire = millis() + WSPR_INTERVAL;
+  // Reset the tone to the base frequency and turn on the output
+  si5351.output_enable(SI5351_CLK0, 1);
     
-  // Reset the tone to 0 and turn on the output
-  si5351.set_clock_pwr(SI5351_CLK0, 1);
-  digitalWrite(TX_LED_PIN, LOW);
-    
-  // Now do the rest of the message
-  for (i = 0; i < SYMBOL_COUNT; i++)
+/*
+  // Now transmit the channel symbols
+  if ((cur_mode == MODE_FSQ_2) || (cur_mode == MODE_FSQ_3) || (cur_mode == MODE_FSQ_4_5) || (cur_mode == MODE_FSQ_6))
   {
-    si5351.set_freq((freqs[sel_freq] * 100) + (buf[i] * TONE_SPACING), SI5351_CLK0);
-    while(millis() < timer_expire);
-    timer_expire = millis() + WSPR_INTERVAL;
+    uint8_t j = 0;
+
+    while(tx_buffer[j++] != 0xff);
+
+    mode_params[cur_mode].symbol_count = j - 1;
   }
-        
+*/
+
+  for (i = 0; i < mode_params[cur_mode].symbol_count; i++)
+  {
+      si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * 100) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
+      delay(mode_params[cur_mode].tone_delay);
+  }
+
   // Turn off the output
-  si5351.set_clock_pwr(SI5351_CLK0, 0);
-  digitalWrite(TX_LED_PIN, HIGH);
+  si5351.output_enable(SI5351_CLK0, 0);
 }
 
-void processSyncMessage()
+static void set_tx_buffer()
+{
+  // Clear out the transmit buffer
+  memset(tx_buffer, 0, 255);
+
+  // Set the proper frequency and timer CTC depending on mode
+  switch(cur_mode)
+  {
+  case MODE_JT9:
+    jtencode.jt9_encode(message, tx_buffer);
+    break;
+  case MODE_JT65:
+    jtencode.jt65_encode(message, tx_buffer);
+    break;
+  case MODE_JT4:
+    jtencode.jt4_encode(message, tx_buffer);
+    break;
+  case MODE_WSPR:
+    jtencode.wspr_encode(call, loc, dbm, tx_buffer);
+    break;
+  case MODE_FT8:
+    jtencode.ft8_encode(message, tx_buffer);
+    break;
+/*
+  case MODE_FSQ_2:
+  case MODE_FSQ_3:
+  case MODE_FSQ_4_5:
+  case MODE_FSQ_6:
+    jtencode.fsq_dir_encode(call, "n0call", ' ', "hello world", tx_buffer);
+    break;
+*/
+  }
+}
+
+static void processSyncMessage()
 {
   // Process gps messages
   if (gps.encode(Serial1.read()))
@@ -158,100 +187,8 @@ void processSyncMessage()
   }
 }
 
-void ppsInterrupt()
+static void display_test(void)
 {
-  
-}
-
-void scan_i2c(void)
-{
-  byte error, address;
-  int nDevices;
- 
-  Serial.println("Scanning...");
- 
-  nDevices = 0;
-  for(address = 1; address < 127; address++ )
-  {
-    // The i2c_scanner uses the return value of
-    // the Write.endTransmisstion to see if
-    // a device did acknowledge to the address.
-    Wire.beginTransmission(address);
-    error = Wire.endTransmission();
- 
-    if (error == 0)
-    {
-      Serial.print("I2C device found at address 0x");
-      if (address<16)
-        Serial.print("0");
-      Serial.print(address,HEX);
-      Serial.println("  !");
- 
-      nDevices++;
-    }
-    else if (error==4)
-    {
-      Serial.print("Unknown error at address 0x");
-      if (address<16)
-        Serial.print("0");
-      Serial.println(address,HEX);
-    }    
-  }
-  if (nDevices == 0)
-    Serial.println("No I2C devices found\n");
-  else
-    Serial.println("done\n");
-}
-
-void setup()
-{
-  // Use the Arduino's on-board LED as a keying indicator.
-  pinMode(TX_LED_PIN, OUTPUT);
-  pinMode(SYNC_LED_PIN, OUTPUT);
-  
-  digitalWrite(TX_LED_PIN, HIGH);
-  digitalWrite(SYNC_LED_PIN, LOW);
-
-  pinMode(GPS_PPS_PIN, INPUT_PULLUP);
-
-  Serial.begin(115200);
-
-  Serial.println("GPS Serial setup ...");
-  Serial1.begin(9600);
-
-  Wire.begin();
-
-  scan_i2c();
-
-  Serial.println("GPS 1PPS Interrupt setup...");
-  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), ppsInterrupt, RISING);
-
-  Serial.println("SSD1306 Initialization...");
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS))
-  {
-    Serial.println("SSD1306 allocation failed!");
-    for(;;);
-  }
-
-  // Clear the buffer
-  display.clearDisplay();
-  display.display();
-
-  Serial.println("Si5351 Initialization...");
-  // Initialize the Si5351
-  // Change the 2nd parameter in init if using a ref osc other
-  // than 25 MHz
-  si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, CORRECTION);
-
-  // Set CLK0 output
-  si5351.set_freq(freqs[sel_freq] * 100, SI5351_CLK0);
-  si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA); // Set for max power
-  si5351.set_clock_pwr(SI5351_CLK0, 0); // Disable the clock initially
-
-  jtencode.wspr_encode(call, loc, dbm, tx_buffer_1);
-  jtencode.wspr_encode("OK8RM/X", "JN79LT", 23, tx_buffer_2);
-
   display.drawTriangle(8, 0, 0, 8, 8, 8, SSD1306_WHITE);
   display.fillTriangle(4, 4, 0, 8, 4, 8, SSD1306_WHITE);
   display.drawRect(110, 0, 16, 8, SSD1306_WHITE);
@@ -272,13 +209,58 @@ void setup()
   display.setTextSize(1);
   display.println("JN79LT");
   display.display();
+}
+
+void ppsInterrupt()
+{
+  
+}
+
+void setup()
+{
+  Serial.begin(115200);
+  Wire.begin();
+
+  Serial.println("NEO-6M setup...");
+  Serial1.begin(9600);
+
+  Serial.println("NEO-6M 1PPS IRQ setup...");
+  pinMode(GPS_PPS_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), ppsInterrupt, RISING);
+
+  Serial.println("SSD1306 setup...");
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_I2C_ADDRESS))
+  {
+    Serial.println("ERROR: SSD1306 allocation failed!");
+    for(;;);
+  }
+
+  // Clear the buffer
+  display.clearDisplay();
+  display.display();
+
+  Serial.println("Si5351 setup...");
+  // Initialize the Si5351
+  // Change the 2nd parameter in init if using a ref osc other than 25 MHz
+  si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, CORRECTION);
+
+  // Set CLK0 output
+  si5351.set_freq(wspr_freqs[sel_freq] * 100, SI5351_CLK0);
+  // Set for max power
+  si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
+  // Disable the clock initially
+  si5351.set_clock_pwr(SI5351_CLK0, 0);
+
+  set_tx_buffer();
+
+  display_test();
 
   Serial.println("Done...");
 }
  
 void loop()
 {
-  Serial1.println("Hello");
   if (Serial1.available())
   {
     processSyncMessage();
@@ -301,15 +283,7 @@ void loop()
   // if(timeSet && timeStatus() == timeSet && minute() % 2 == 0 && second() == 0)
   if (timeSet && timeStatus() == timeSet && (minute() % 10 == 0 || minute() % 10 == 4) && second() == 0)
   {
-    encode(tx_buffer_1);
+    encode();
     delay(1000);
   }
-
-  if (timeSet && timeStatus() == timeSet && (minute() % 10 == 2 || minute() % 10 == 6) && second() == 0)
-  {
-    encode(tx_buffer_2);
-    delay(1000);
-  }
-  
-  //delay(100);
 }
