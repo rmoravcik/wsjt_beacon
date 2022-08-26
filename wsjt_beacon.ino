@@ -26,6 +26,7 @@
 
 enum screen {
   SCREEN_STATUS = 0,
+  SCREEN_SET_MODE,
   SCREEN_SET_FREQUENCY,
   SCREEN_GPS_STATUS,
   SCREEN_COUNT
@@ -324,6 +325,12 @@ static void show_status_screen(void)
   display_test();
 }
 
+static void show_set_mode_screen(void)
+{
+  display.clearDisplay();
+  display_header("Mode");
+}
+
 static void show_set_frequency_screen(void)
 {
   display.clearDisplay();
@@ -433,6 +440,9 @@ void loop()
 
   switch (cur_screen)
   {
+    case SCREEN_SET_MODE:
+      show_set_mode_screen();
+      break;
     case SCREEN_SET_FREQUENCY:
       show_set_frequency_screen();
       break;
