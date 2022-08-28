@@ -6,7 +6,7 @@
 #include <TimeLib.h>
 #include <TinyGPS.h>
 #include <ClickEncoder.h>
-#include <Adafruit_SSD1306.h>
+#include "ssd1306.h"
 #include <EEPROM.h>
 
 #include "config.h"
@@ -161,7 +161,6 @@ Si5351 si5351;
 JTEncode jtencode;
 TinyGPS gps;
 ClickEncoder encoder(ENC_A_PIN, ENC_B_PIN, ENC_BUTTON_PIN, 4);
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 uint8_t sel_freq = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
@@ -319,6 +318,7 @@ static void start_calibration(void)
 
 static void display_test(void)
 {
+#if 0
   display.drawTriangle(8, 0, 0, 8, 8, 8, SSD1306_WHITE);
   display.fillTriangle(4, 4, 0, 8, 4, 8, SSD1306_WHITE);
   display.drawRect(110, 0, 16, 8, SSD1306_WHITE);
@@ -339,14 +339,14 @@ static void display_test(void)
   display.setTextSize(1);
   display.println("JN79LT");
   display.display();
+#endif
 }
 
 static void display_header(const char *text)
 {
-  display.setCursor(24, 0);
-  display.setTextSize(2);
-  display.println(text);
-  display.display();
+  uint8_t x = (ssd1306_displayWidth() - (7 * strlen(text))) / 2;
+  ssd1306_setFixedFont(ssd1306xled_font6x8);
+  ssd1306_printFixed(x,  0, text, STYLE_NORMAL);
 }
 
 static void switch_screen(void)
@@ -387,24 +387,22 @@ static void show_status_screen(void)
 
 static void show_set_mode_screen(void)
 {
-  display.clearDisplay();
+  ssd1306_clearScreen();
   display_header("Mode");
   write_config();
 }
 
 static void show_set_frequency_screen(void)
 {
-  display.clearDisplay();
+  ssd1306_clearScreen();
   display_header("Frequency");
 
-  display.setCursor(0, 24);
-  display.setTextSize(2);
-  display.println(mode_params[cur_mode].freqs[sel_freq]);
+  ssd1306_printFixed(0, 24, mode_params[cur_mode].freqs[sel_freq], STYLE_NORMAL);
 }
 
 static void show_gps_status_screen(void)
 {
-  display.clearDisplay();
+  ssd1306_clearScreen();
   display_header("GPS Status");
 
   DEBUG("Satellites: ");
@@ -426,16 +424,10 @@ void setup()
   pinMode(GPS_PPS_PIN, INPUT_PULLUP);
 
   DEBUGLN("SSD1306 setup...");
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_I2C_ADDRESS))
-  {
-    DEBUGLN("ERROR: SSD1306 allocation failed!");
-    for(;;);
-  }
+  ssd1306_128x64_i2c_init();
 
   // Clear the buffer
-  display.clearDisplay();
-  display.display();
+  ssd1306_clearScreen();
 
   DEBUGLN("Si5351 setup...");
   // Initialize the Si5351
