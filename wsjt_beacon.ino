@@ -170,7 +170,11 @@ static uint8_t tx_buffer[255];
 uint8_t cur_screen = SCREEN_STATUS;
 
 bool edit_mode = false;
-constexpr uint32_t CORRECTION    = 0;                   // Change this for your ref osc
+
+#define CAL_FREQUENCY 200000000UL
+static int32_t cal_factor = 0;
+volatile bool cal_finished = true;
+volatile uint32_t measured_freq = 0;
 
 static void read_config(void)
 {
@@ -259,7 +263,7 @@ static void set_tx_buffer(char *tx_buffer)
   }
 }
 
-static void processSyncMessage()
+static void process_sync_message()
 {
   // Process gps messages
   if (gps.encode(Serial1.read()))
@@ -278,6 +282,39 @@ static void processSyncMessage()
       adjustTime(offset * SECS_PER_HOUR);
     }
   }
+}
+
+static void pps_interrupt()
+{
+  if (cal_finished == true)
+  {
+    // start counting
+    cal_finished = false;
+  }
+  else
+  {
+    measured_freq = 2000000;
+    cal_finished = true;
+  }
+}
+
+static void start_calibration(void)
+{
+  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
+
+  si5351.output_enable(SI5351_CLK2, 1);
+
+  do {
+    delay(100);
+  } while (!cal_finished);
+
+  detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
+
+  cal_factor = (CAL_FREQUENCY - (measured_freq * 100)) + cal_factor;
+
+  si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
+
+  si5351.output_enable(SI5351_CLK2, 0);
 }
 
 static void display_test(void)
@@ -359,6 +396,10 @@ static void show_set_frequency_screen(void)
 {
   display.clearDisplay();
   display_header("Frequency");
+
+  display.setCursor(0, 24);
+  display.setTextSize(2);
+  display.println(mode_params[cur_mode].freqs[sel_freq]);
 }
 
 static void show_gps_status_screen(void)
@@ -368,11 +409,6 @@ static void show_gps_status_screen(void)
 
   DEBUG("Satellites: ");
   DEBUGLN(gps.satellites());
-}
-
-static void pps_interrupt()
-{
-  
 }
 
 void setup()
@@ -388,7 +424,6 @@ void setup()
 
   DEBUGLN("NEO-6M 1PPS IRQ setup...");
   pinMode(GPS_PPS_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
 
   DEBUGLN("SSD1306 setup...");
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
@@ -405,14 +440,19 @@ void setup()
   DEBUGLN("Si5351 setup...");
   // Initialize the Si5351
   // Change the 2nd parameter in init if using a ref osc other than 25 MHz
-  si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, CORRECTION);
+  si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, cal_factor);
 
   // Set CLK0 output
-  si5351.set_freq(wspr_freqs[sel_freq] * 100, SI5351_CLK0);
+  si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * 100, SI5351_CLK0);
   // Set for max power
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
   // Disable the clock initially
   si5351.set_clock_pwr(SI5351_CLK0, 0);
+
+  // Set CLK2 output
+  si5351.set_freq(CAL_FREQUENCY, SI5351_CLK2);
+  // Disable the clock initially
+  si5351.set_clock_pwr(SI5351_CLK2, 0);
 
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
@@ -425,7 +465,7 @@ void loop()
 
   if (Serial1.available())
   {
-    processSyncMessage();
+    process_sync_message();
   }
   
   if (timeStatus() == timeSet)
@@ -434,6 +474,7 @@ void loop()
   }
   else
   {
+    start_calibration();
     digitalWrite(SYNC_LED_PIN, LOW);  // LED off if needs refresh
   }
 
