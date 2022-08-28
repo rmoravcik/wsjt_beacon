@@ -344,7 +344,7 @@ static void display_test(void)
 
 static void display_header(const char *text)
 {
-  uint8_t x = (ssd1306_displayWidth() - (7 * strlen(text))) / 2;
+  uint8_t x = (ssd1306_displayWidth() - (6 * strlen(text))) / 2;
   ssd1306_setFixedFont(ssd1306xled_font6x8);
   ssd1306_printFixed(x,  0, text, STYLE_NORMAL);
 }
