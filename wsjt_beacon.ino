@@ -11,7 +11,7 @@
 
 #include "config.h"
 
-#define DEBUG_TRACES     0
+#define DEBUG_TRACES     1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -165,15 +165,36 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 uint8_t sel_freq = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
+
+static uint8_t tx_buffer[255];
 uint8_t cur_screen = SCREEN_STATUS;
+
 bool edit_mode = false;
 constexpr uint32_t CORRECTION    = 0;                   // Change this for your ref osc
 
-uint8_t tx_buffer[255];
-int16_t encoder_prev_value = 0;
+static void read_config(void)
+{
+  cur_mode = EEPROM.read(EEPROM_MODE);
+  if (cur_mode > MODE_COUNT)
+  {
+    cur_mode = MODE_WSPR;
+  }
+
+  sel_freq = EEPROM.read(EEPROM_FREQUENCY);
+  if (sel_freq > BAND_COUNT)
+  {
+    sel_freq = BAND_20M;
+  } 
+}
+
+static void write_config(void)
+{
+  EEPROM.write(EEPROM_MODE, cur_mode);
+  EEPROM.write(EEPROM_FREQUENCY, sel_freq);
+}
 
 // Loop through the string, transmitting one character at a time.
-static void encode(void)
+static void encode(char *tx_buffer)
 {
   uint8_t i;
 
@@ -202,7 +223,7 @@ static void encode(void)
   si5351.output_enable(SI5351_CLK0, 0);
 }
 
-static void set_tx_buffer()
+static void set_tx_buffer(char *tx_buffer)
 {
   // Clear out the transmit buffer
   memset(tx_buffer, 0, 255);
@@ -293,6 +314,8 @@ static void display_header(const char *text)
 
 static void switch_screen(void)
 {
+  static int16_t encoder_prev_value = 0;
+
   if (!edit_mode)
   {
     int16_t encoder_cur_value = encoder.getValue();
@@ -329,6 +352,7 @@ static void show_set_mode_screen(void)
 {
   display.clearDisplay();
   display_header("Mode");
+  write_config();
 }
 
 static void show_set_frequency_screen(void)
@@ -346,24 +370,9 @@ static void show_gps_status_screen(void)
   DEBUGLN(gps.satellites());
 }
 
-void pps_interrupt()
+static void pps_interrupt()
 {
   
-}
-
-static void read_configuration(void)
-{
-  cur_mode = EEPROM.read(EEPROM_MODE);
-  if (cur_mode > MODE_COUNT)
-  {
-    cur_mode = MODE_WSPR;
-  }
-
-  sel_freq = EEPROM.read(EEPROM_FREQUENCY);
-  if (sel_freq > BAND_COUNT)
-  {
-    sel_freq = BAND_20M;
-  } 
 }
 
 void setup()
@@ -372,7 +381,7 @@ void setup()
   Wire.begin();
 
   DEBUGLN("Reading EEPROM configuration...");
-  read_configuration();
+  read_config();
 
   DEBUGLN("NEO-6M setup...");
   Serial1.begin(9600);
@@ -405,13 +414,15 @@ void setup()
   // Disable the clock initially
   si5351.set_clock_pwr(SI5351_CLK0, 0);
 
-  set_tx_buffer();
+  DEBUGLN("Setting TX buffer...");
+  set_tx_buffer(tx_buffer);
 
   DEBUGLN("Done...");
 }
  
 void loop()
 {
+
   if (Serial1.available())
   {
     processSyncMessage();
@@ -432,7 +443,7 @@ void loop()
   // if(timeSet && timeStatus() == timeSet && minute() % 2 == 0 && second() == 0)
   if (timeSet && timeStatus() == timeSet && (minute() % 10 == 0 || minute() % 10 == 4) && second() == 0)
   {
-    encode();
+    encode(tx_buffer);
     delay(1000);
   }
 

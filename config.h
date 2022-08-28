@@ -14,6 +14,6 @@ const char message[] = "OK8RM JN79";
 const uint8_t dbm = 30;
 
 // Offset hours from gps time (UTC)
-const int offset = 1;
+const int8_t offset = 1;
 
 #endif /* _CONFIG_H_ */
