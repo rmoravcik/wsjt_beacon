@@ -299,19 +299,61 @@ static void pps_interrupt()
   }
 }
 
+volatile uint32_t overflow_counter = 0;
+volatile uint16_t counter = 0;
+
+ISR(TCB0_INT_vect)
+{
+  counter = TCB0.CCMP;
+  overflow_counter++;
+}
+
 static void config_timer(void)
 {
+#if 1
   EVSYS.CHANNEL0 = EVSYS_GENERATOR_PORT1_PIN1_gc;
   EVSYS.USERTCB0 = EVSYS_CHANNEL_CHANNEL0_gc;
 
   TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
-  TCB0.EVCTRL = TCB_CAPTEI_bm;
+  TCB0.EVCTRL = TCB_CAPTEI_bm |
+                TCB_EDGE_bp;
 
   TCB0.INTCTRL = TCB_CAPT_bm;            /* Capture or Timeout: enabled */
 
-  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc     /* CLK_PER/2 (From Prescaler) */
-              | TCB_ENABLE_bm            /* Enable: enabled */
-              | TCB_RUNSTDBY_bm;         /* Run Standby: enabled */
+  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc |   /* CLK_PER/2 (From Prescaler) */
+               TCB_ENABLE_bm |           /* Enable: enabled */
+               TCB_RUNSTDBY_bm;          /* Run Standby: enabled */
+#endif
+
+  DEBUG("EVSYS.CHANNEL0 = ");
+  DEBUGLN(EVSYS.CHANNEL0);
+  DEBUG("EVSYS.USERTCB0 = ");
+  DEBUGLN(EVSYS.USERTCB0);
+  DEBUG("TCB0.CTRLA = ");
+  DEBUGLN(TCB0.CTRLA);
+  DEBUG("TCB0.CTRLB = ");
+  DEBUGLN(TCB0.CTRLB);
+  DEBUG("TCB0.EVCTRL = ");
+  DEBUGLN(TCB0.EVCTRL);
+  DEBUG("TCB0.INTCTRL = ");
+  DEBUGLN(TCB0.INTCTRL);
+  DEBUG("TCB1.CTRLA = ");
+  DEBUGLN(TCB1.CTRLA);
+  DEBUG("TCB1.CTRLB = ");
+  DEBUGLN(TCB1.CTRLB);
+  DEBUG("TCB1.EVCTRL = ");
+  DEBUGLN(TCB1.EVCTRL);
+  DEBUG("TCB1.INTCTRL = ");
+  DEBUGLN(TCB1.INTCTRL);
+  DEBUG("TCB2.CTRLA = ");
+  DEBUGLN(TCB2.CTRLA);
+  DEBUG("TCB2.CTRLB = ");
+  DEBUGLN(TCB2.CTRLB);
+  DEBUG("TCB2.EVCTRL = ");
+  DEBUGLN(TCB2.EVCTRL);
+  DEBUG("TCB2.INTCTRL = ");
+  DEBUGLN(TCB2.INTCTRL);
+
 }
 
 static void start_calibration(void)
@@ -657,4 +699,8 @@ void loop()
       show_status_screen();
       break;
   }
+
+  DEBUG("overflow:");
+  DEBUGLN(overflow_counter);
+  delay(1000);
 }
