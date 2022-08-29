@@ -299,6 +299,21 @@ static void pps_interrupt()
   }
 }
 
+static void config_timer(void)
+{
+  EVSYS.CHANNEL0 = EVSYS_GENERATOR_PORT1_PIN1_gc;
+  EVSYS.USERTCB0 = EVSYS_CHANNEL_CHANNEL0_gc;
+
+  TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
+  TCB0.EVCTRL = TCB_CAPTEI_bm;
+
+  TCB0.INTCTRL = TCB_CAPT_bm;            /* Capture or Timeout: enabled */
+
+  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc     /* CLK_PER/2 (From Prescaler) */
+              | TCB_ENABLE_bm            /* Enable: enabled */
+              | TCB_RUNSTDBY_bm;         /* Run Standby: enabled */
+}
+
 static void start_calibration(void)
 {
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
@@ -589,6 +604,9 @@ void setup()
 
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
+
+  DEBUGLN("Configure TimerB...");
+  config_timer();
 
   DEBUGLN("Done...");
 }
