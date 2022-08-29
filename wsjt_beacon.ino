@@ -29,6 +29,7 @@ enum screen {
   SCREEN_SET_MODE,
   SCREEN_SET_FREQUENCY,
   SCREEN_GPS_STATUS,
+  SCREEN_CALIBRATION,
   SCREEN_COUNT
 };
 
@@ -172,6 +173,7 @@ bool edit_mode = false;
 
 #define CAL_FREQUENCY 200000000UL
 static int32_t cal_factor = 0;
+static bool cal_factor_valid = false;
 volatile bool cal_finished = true;
 volatile uint32_t measured_freq = 0;
 
@@ -310,56 +312,49 @@ static void start_calibration(void)
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
   cal_factor = (CAL_FREQUENCY - (measured_freq * 100)) + cal_factor;
+  cal_factor_valid = true;
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
 
   si5351.output_enable(SI5351_CLK2, 0);
 }
 
-static void display_test(void)
-{
-#if 0
-  display.drawTriangle(8, 0, 0, 8, 8, 8, SSD1306_WHITE);
-  display.fillTriangle(4, 4, 0, 8, 4, 8, SSD1306_WHITE);
-  display.drawRect(110, 0, 16, 8, SSD1306_WHITE);
-  display.drawRect(126, 2, 2, 4, SSD1306_WHITE);
-
-  // Start at top-left corner
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(48, 0);
-  display.println("20:59");
-  display.setCursor(0, 24);
-  display.setTextSize(2);
-  display.println("  14.0936");
-  display.setCursor(0, 56);
-  display.setTextSize(1);
-  display.println("OK8RM");
-  display.setCursor(90, 56);
-  display.setTextSize(1);
-  display.println("JN79LT");
-  display.display();
-#endif
-}
-
 static void display_header(const char *text)
 {
   uint8_t x = (ssd1306_displayWidth() - (6 * strlen(text))) / 2;
   ssd1306_setFixedFont(ssd1306xled_font6x8);
-  ssd1306_printFixed(x,  0, text, STYLE_NORMAL);
+  ssd1306_printFixed(x, 0, text, STYLE_NORMAL);
+}
+
+static void display_mode(const char *text)
+{
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+  ssd1306_printFixed(48, 24, text, STYLE_NORMAL);
+}
+
+static void display_frequency(const uint32_t value, const char *unit)
+{
+  uint8_t freq1 = value / 1000000;
+  uint16_t freq2 = (value / 100) % 1000;
+  char text[13];
+
+  sprintf(text, "%3d.%04d %3s", freq1, freq2, unit);
+
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+  ssd1306_printFixed(16,  24, text, STYLE_NORMAL);
 }
 
 static void switch_screen(void)
 {
-  static int16_t encoder_prev_value = 0;
+  static int16_t prev_value = 0;
 
   if (!edit_mode)
   {
-    int16_t encoder_cur_value = encoder.getValue();
+    int16_t cur_value = encoder.getValue();
   
-    if (encoder_prev_value != encoder_cur_value)
+    if (prev_value != cur_value)
     {
-      if (encoder_cur_value > encoder_prev_value)
+      if (cur_value > prev_value)
       {
         cur_screen++;
         if (cur_screen == SCREEN_COUNT)
@@ -375,38 +370,184 @@ static void switch_screen(void)
         }
         cur_screen--;
       }
-      encoder_prev_value = encoder_cur_value;
+      prev_value = cur_value;
     }  
   }
 }
 
+static int8_t check_value_changed(void)
+{
+  static int16_t prev_value = 0;
+  
+  if (edit_mode == true)
+  {
+    if (encoder.getButton() == ClickEncoder::Clicked)
+    {
+      write_config();
+      edit_mode = false;
+    }
+
+    int16_t cur_value = encoder.getValue();
+    if (cur_value != prev_value)
+    {
+      if (cur_value > prev_value)
+      {
+        return 1;
+      }
+      else
+      {
+        return -1;
+      }
+      prev_value = cur_value;
+    }
+  }
+  else
+  {
+    if (encoder.getButton() == ClickEncoder::Clicked)
+    {
+      edit_mode = true;
+    }
+  }  
+
+  return 0;
+}
+
 static void show_status_screen(void)
 {
-  display_test();
+  char buf[6];
+
+//  display.drawTriangle(8, 0, 0, 8, 8, 8, SSD1306_WHITE);
+//  display.fillTriangle(4, 4, 0, 8, 4, 8, SSD1306_WHITE);
+//  display.drawRect(110, 0, 16, 8, SSD1306_WHITE);
+//  display.drawRect(126, 2, 2, 4, SSD1306_WHITE);
+
+  ssd1306_setFixedFont(ssd1306xled_font6x8);
+
+  sprintf(buf, "%02d:%02d", hour(), minute());
+  ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
+
+  ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
+  ssd1306_printFixed(104, 56,  loc, STYLE_NORMAL);
 }
 
 static void show_set_mode_screen(void)
 {
+  int8_t value = check_value_changed();
+
+  if (value != 0)
+  {
+    if (value > 0)
+    {
+      cur_mode++;
+      if (cur_mode > MODE_COUNT)
+      {
+        cur_mode = 0;
+      }
+    }
+    else
+    {
+      if (cur_mode == 0)
+      {
+        cur_mode = MODE_COUNT;
+      }
+      cur_mode--;
+    }
+  }
+
   ssd1306_clearScreen();
   display_header("Mode");
-  write_config();
+  display_mode(mode_params[cur_mode].mode_name);
 }
 
 static void show_set_frequency_screen(void)
 {
+  int8_t value = check_value_changed();
+
+  if (value != 0)
+  {
+    if (value > 0)
+    {
+      sel_freq++;
+      if (sel_freq > BAND_COUNT)
+      {
+        sel_freq = 0;
+      }
+    }
+    else
+    {
+      if (sel_freq == 0)
+      {
+        sel_freq = BAND_COUNT;
+      }
+      sel_freq--;
+    }
+  }
+
   ssd1306_clearScreen();
   display_header("Frequency");
 
-  ssd1306_printFixed(0, 24, mode_params[cur_mode].freqs[sel_freq], STYLE_NORMAL);
+  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 }
 
 static void show_gps_status_screen(void)
 {
+  long lat, lon;
+  unsigned long age;
+  char buf[21];
+  
   ssd1306_clearScreen();
   display_header("GPS Status");
 
-  DEBUG("Satellites: ");
-  DEBUGLN(gps.satellites());
+  ssd1306_setFixedFont(ssd1306xled_font6x8);
+
+  gps.get_position(&lat, &lon, &age);
+
+  sprintf(buf, "Satellites: %2d", gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
+  ssd1306_printFixed( 0, 16, buf, STYLE_NORMAL);
+
+  sprintf(buf, "HDOP: %02d", gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
+  ssd1306_printFixed( 0, 16, buf, STYLE_NORMAL);
+
+  int8_t lat1 = lat / 1000000;
+  int8_t lat2 = (lat / 1000) % 1000;
+  sprintf(buf, "Latitude  : %02d.%03d", lat1, lat2);
+  ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
+
+  int8_t lon1 = lon / 1000000;
+  int8_t lon2 = (lon / 1000) % 1000;
+  sprintf(buf, "Longitude : %02d.%03d", lon1, lon2);
+  ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
+
+  sprintf(buf, "Fix Age   : %4d", age);
+  ssd1306_printFixed( 0, 40, buf, STYLE_NORMAL);
+
+  int Year;
+  byte Month, Day, Hour, Minute, Second;
+
+  gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, NULL);
+  sprintf(buf, "GPS Time  : %02u.%02u.%04u %02u:%02u:%02u", Day, Month, Year, Hour, Minute, Second);
+  ssd1306_printFixed( 0, 48, buf, STYLE_NORMAL);
+}
+
+static void show_calibration_screen(void)
+{
+  check_value_changed();
+  
+  ssd1306_clearScreen();
+  display_header("Calibration");
+
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+
+  if (edit_mode == true)
+  {
+    ssd1306_printFixed(36,  24, "Disabled", STYLE_NORMAL);  
+ 
+  }
+  else
+  {
+    ssd1306_printFixed(36,  24, "Enabled", STYLE_NORMAL);
+    start_calibration();  
+  }
 }
 
 void setup()
@@ -462,12 +603,10 @@ void loop()
   
   if (timeStatus() == timeSet)
   {
-    digitalWrite(SYNC_LED_PIN, HIGH); // LED on if synced
-  }
-  else
-  {
-    start_calibration();
-    digitalWrite(SYNC_LED_PIN, LOW);  // LED off if needs refresh
+    if (cal_factor_valid == false)
+    {
+      start_calibration();
+    }
   }
 
   // Trigger every 10th minute
@@ -492,6 +631,9 @@ void loop()
       break;
     case SCREEN_GPS_STATUS:
       show_gps_status_screen();
+      break;
+    case SCREEN_CALIBRATION:
+      show_calibration_screen();
       break;
     default:
       show_status_screen();
