@@ -146,16 +146,11 @@ const struct mode_param mode_params[MODE_COUNT] {
 };
 
 #define GPS_PPS_PIN           10
-#define SYNC_LED_PIN          12
+#define CAL_SIGNAL             6
 
 #define ENC_A_PIN              3
 #define ENC_B_PIN              2
 #define ENC_BUTTON_PIN         4
-
-#define SCREEN_WIDTH         128
-#define SCREEN_HEIGHT         64
-
-#define SSD1306_I2C_ADDRESS 0x3C
 
 // Global variables
 Si5351 si5351;
@@ -171,11 +166,12 @@ uint8_t cur_screen = SCREEN_STATUS;
 
 bool edit_mode = false;
 
-#define CAL_FREQUENCY 200000000UL
+#define CAL_FREQ 100000000UL
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
 volatile bool cal_finished = true;
 volatile uint32_t measured_freq = 0;
+volatile uint32_t freq_counter = 0;
 
 static void read_config(void)
 {
@@ -289,71 +285,31 @@ static void pps_interrupt()
 {
   if (cal_finished == true)
   {
-    // start counting
+    freq_counter = 0;
     cal_finished = false;
   }
   else
   {
-    measured_freq = 2000000;
+    measured_freq = freq_counter;
     cal_finished = true;
   }
 }
 
-volatile uint32_t overflow_counter = 0;
-volatile uint16_t counter = 0;
-
 ISR(TCB0_INT_vect)
 {
-  counter = TCB0.CCMP;
-  overflow_counter++;
+  freq_counter += TCB0.CCMP;
 }
 
 static void config_timer(void)
 {
-#if 1
-  EVSYS.CHANNEL0 = EVSYS_GENERATOR_PORT1_PIN1_gc;
-  EVSYS.USERTCB0 = EVSYS_CHANNEL_CHANNEL0_gc;
+  EVSYS.CHANNEL4 = EVSYS_GENERATOR_PORT1_PIN4_gc;
+  EVSYS.USERTCB0 = EVSYS_CHANNEL_CHANNEL4_gc;
 
+  TCB0.CTRLA = 0;
   TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
-  TCB0.EVCTRL = TCB_CAPTEI_bm |
-                TCB_EDGE_bp;
-
-  TCB0.INTCTRL = TCB_CAPT_bm;            /* Capture or Timeout: enabled */
-
-  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc |   /* CLK_PER/2 (From Prescaler) */
-               TCB_ENABLE_bm |           /* Enable: enabled */
-               TCB_RUNSTDBY_bm;          /* Run Standby: enabled */
-#endif
-
-  DEBUG("EVSYS.CHANNEL0 = ");
-  DEBUGLN(EVSYS.CHANNEL0);
-  DEBUG("EVSYS.USERTCB0 = ");
-  DEBUGLN(EVSYS.USERTCB0);
-  DEBUG("TCB0.CTRLA = ");
-  DEBUGLN(TCB0.CTRLA);
-  DEBUG("TCB0.CTRLB = ");
-  DEBUGLN(TCB0.CTRLB);
-  DEBUG("TCB0.EVCTRL = ");
-  DEBUGLN(TCB0.EVCTRL);
-  DEBUG("TCB0.INTCTRL = ");
-  DEBUGLN(TCB0.INTCTRL);
-  DEBUG("TCB1.CTRLA = ");
-  DEBUGLN(TCB1.CTRLA);
-  DEBUG("TCB1.CTRLB = ");
-  DEBUGLN(TCB1.CTRLB);
-  DEBUG("TCB1.EVCTRL = ");
-  DEBUGLN(TCB1.EVCTRL);
-  DEBUG("TCB1.INTCTRL = ");
-  DEBUGLN(TCB1.INTCTRL);
-  DEBUG("TCB2.CTRLA = ");
-  DEBUGLN(TCB2.CTRLA);
-  DEBUG("TCB2.CTRLB = ");
-  DEBUGLN(TCB2.CTRLB);
-  DEBUG("TCB2.EVCTRL = ");
-  DEBUGLN(TCB2.EVCTRL);
-  DEBUG("TCB2.INTCTRL = ");
-  DEBUGLN(TCB2.INTCTRL);
-
+  TCB0.EVCTRL = TCB_CAPTEI_bm | TCB_EDGE_bp;
+  TCB0.INTCTRL = TCB_CAPT_bm;
+  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc | TCB_ENABLE_bm | TCB_RUNSTDBY_bm;
 }
 
 static void start_calibration(void)
@@ -368,11 +324,12 @@ static void start_calibration(void)
 
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
-  cal_factor = (CAL_FREQUENCY - (measured_freq * 100)) + cal_factor;
+  cal_factor = (CAL_FREQ - (measured_freq * 100)) + cal_factor;
   cal_factor_valid = true;
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
 
+  si5351.output_enable(SI5351_CLK0, 1);
   si5351.output_enable(SI5351_CLK2, 0);
 }
 
@@ -640,7 +597,7 @@ void setup()
   si5351.set_clock_pwr(SI5351_CLK0, 0);
 
   // Set CLK2 output
-  si5351.set_freq(CAL_FREQUENCY, SI5351_CLK2);
+  si5351.set_freq(CAL_FREQ, SI5351_CLK2);
   // Disable the clock initially
   si5351.set_clock_pwr(SI5351_CLK2, 0);
 
@@ -700,7 +657,7 @@ void loop()
       break;
   }
 
-  DEBUG("overflow:");
-  DEBUGLN(overflow_counter);
+  DEBUG("freq_counter:");
+  DEBUGLN(freq_counter);
   delay(1000);
 }
