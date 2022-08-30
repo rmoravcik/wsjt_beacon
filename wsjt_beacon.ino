@@ -148,8 +148,8 @@ const struct mode_param mode_params[MODE_COUNT] {
 #define GPS_PPS_PIN           10
 #define CAL_SIGNAL_PIN         6
 
-#define ENC_A_PIN              3
-#define ENC_B_PIN              2
+#define ENC_A_PIN              2
+#define ENC_B_PIN              3
 #define ENC_BUTTON_PIN         4
 
 // Global variables
@@ -391,10 +391,14 @@ static void switch_screen(void)
 {
   static int16_t prev_value = 0;
 
-  if (!edit_mode)
+  if (edit_mode == false)
   {
     int16_t cur_value = encoder.getValue();
   
+      DEBUG("prev_value=");
+      DEBUG(prev_value);
+      DEBUG(" cur_value=");
+      DEBUGLN(cur_value);
     if (prev_value != cur_value)
     {
       DEBUG("Switching screen from ");
@@ -475,6 +479,8 @@ static void show_status_screen(void)
 
   ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
   ssd1306_printFixed(104, 56,  loc, STYLE_NORMAL);
+
+  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 }
 
 static void show_set_mode_screen(void)
@@ -549,31 +555,33 @@ static void show_gps_status_screen(void)
 
   gps.get_position(&lat, &lon, &age);
 
-  sprintf(buf, "Satellites: %2d", gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
+  sprintf(buf, "Sat.: %d", gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
   ssd1306_printFixed( 0, 16, buf, STYLE_NORMAL);
 
-  sprintf(buf, "HDOP: %02d", gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
-  ssd1306_printFixed( 0, 16, buf, STYLE_NORMAL);
+  sprintf(buf, "HDOP: %d", gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
+  ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
 
   int8_t lat1 = lat / 1000000;
   int8_t lat2 = (lat / 1000) % 1000;
-  sprintf(buf, "Latitude  : %02d.%03d", lat1, lat2);
-  ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
+  sprintf(buf, "Lat.: %02d.%03d", lat1, lat2);
+  ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
 
   int8_t lon1 = lon / 1000000;
   int8_t lon2 = (lon / 1000) % 1000;
-  sprintf(buf, "Longitude : %02d.%03d", lon1, lon2);
-  ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
-
-  sprintf(buf, "Fix Age   : %4d", age);
+  sprintf(buf, "Lon.: %02d.%03d", lon1, lon2);
   ssd1306_printFixed( 0, 40, buf, STYLE_NORMAL);
 
+  sprintf(buf, "Age : %d", age);
+  ssd1306_printFixed( 0, 48, buf, STYLE_NORMAL);
+
+#if 0
   int Year;
   byte Month, Day, Hour, Minute, Second;
 
   gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, NULL);
-  sprintf(buf, "GPS Time  : %02u.%02u.%04u %02u:%02u:%02u", Day, Month, Year, Hour, Minute, Second);
-  ssd1306_printFixed( 0, 48, buf, STYLE_NORMAL);
+  sprintf(buf, "Time: %02u.%02u.%04u %02u:%02u:%02u", Day, Month, Year, Hour, Minute, Second);
+  ssd1306_printFixed( 0, 54, buf, STYLE_NORMAL);
+#endif
 }
 
 static void show_calibration_screen(void)
@@ -585,7 +593,7 @@ static void show_calibration_screen(void)
 
   ssd1306_setFixedFont(ssd1306xled_font8x16);
 
-  if (edit_mode == true)
+  if (edit_mode == false)
   {
     ssd1306_printFixed(36,  24, "Disabled", STYLE_NORMAL);  
     stop_calibration();
@@ -600,7 +608,7 @@ static void show_calibration_screen(void)
 void setup()
 {
   Serial.begin(115200);
-  Wire.begin();
+//  Wire.begin();
 
   DEBUGLN("Reading EEPROM configuration...");
   read_config();
@@ -615,6 +623,7 @@ void setup()
   ssd1306_128x64_i2c_init();
 
   // Clear the buffer
+  DEBUGLN("Clear screen...");
   ssd1306_clearScreen();
 
   DEBUGLN("Si5351 setup...");
@@ -646,6 +655,7 @@ void setup()
  
 void loop()
 {
+  static uint32_t last_update = 0;
 
   if (Serial1.available())
   {
@@ -689,5 +699,11 @@ void loop()
     default:
       show_status_screen();
       break;
+  }
+
+  if ((millis() - last_update) > 1)
+  {
+    encoder.service();
+    last_update = millis();
   }
 }
