@@ -146,7 +146,7 @@ const struct mode_param mode_params[MODE_COUNT] {
 };
 
 #define GPS_PPS_PIN           10
-#define CAL_SIGNAL             6
+#define CAL_SIGNAL_PIN         6
 
 #define ENC_A_PIN              3
 #define ENC_B_PIN              2
@@ -166,12 +166,15 @@ uint8_t cur_screen = SCREEN_STATUS;
 
 bool edit_mode = false;
 
-#define CAL_FREQ 100000000UL
+#define CAL_FREQ 250000000UL
+volatile uint32_t cal_counter = 0;
+volatile uint8_t cal_timeout = 0;
+volatile bool start_cal = false;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
-volatile bool cal_finished = true;
-volatile uint32_t measured_freq = 0;
-volatile uint32_t freq_counter = 0;
+//volatile bool cal_finished = true;
+//volatile uint32_t measured_freq = 0;
+//volatile uint32_t freq_counter = 0;
 
 static void read_config(void)
 {
@@ -283,18 +286,29 @@ static void process_sync_message()
 
 static void pps_interrupt()
 {
-  if (cal_finished == true)
+  if (cal_timeout > 0)
   {
-    freq_counter = 0;
-    cal_finished = false;
+    cal_timeout--;
   }
   else
   {
-    measured_freq = freq_counter;
-    cal_finished = true;
+    if (start_cal == true)
+    {
+      cal_timeout = 20;
+      start_cal = false;
+    }
   }
 }
 
+static void cal_signal_interrupt()
+{
+  if (cal_timeout > 0)
+  {
+    cal_counter++;
+  }
+}
+
+#if 0
 ISR(TCB0_INT_vect)
 {
   freq_counter += TCB0.CCMP;
@@ -311,26 +325,40 @@ static void config_timer(void)
   TCB0.INTCTRL = TCB_CAPT_bm;
   TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc | TCB_ENABLE_bm | TCB_RUNSTDBY_bm;
 }
+#endif
 
 static void start_calibration(void)
 {
+  cal_counter = 0;
+  cal_timeout = 0;
+  start_cal = false;
+
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
+  attachInterrupt(digitalPinToInterrupt(CAL_SIGNAL_PIN), cal_signal_interrupt, RISING);
 
   si5351.output_enable(SI5351_CLK2, 1);
 
+  start_cal = true;
+
   do {
     delay(100);
-  } while (!cal_finished);
+  } while (cal_timeout > 0);
 
+  detachInterrupt(digitalPinToInterrupt(CAL_SIGNAL_PIN));
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
-  cal_factor = (CAL_FREQ - (measured_freq * 100)) + cal_factor;
+  cal_factor = (CAL_FREQ - ((cal_counter / 20) * 100)) + cal_factor;
   cal_factor_valid = true;
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
 
   si5351.output_enable(SI5351_CLK0, 1);
   si5351.output_enable(SI5351_CLK2, 0);
+}
+
+static void stop_calibration(void)
+{
+  si5351.output_enable(SI5351_CLK0, 0);
 }
 
 static void display_header(const char *text)
@@ -555,11 +583,11 @@ static void show_calibration_screen(void)
   if (edit_mode == true)
   {
     ssd1306_printFixed(36,  24, "Disabled", STYLE_NORMAL);  
- 
+    stop_calibration();
   }
   else
   {
-    ssd1306_printFixed(36,  24, "Enabled", STYLE_NORMAL);
+    ssd1306_printFixed(36,  24, "Enabled ", STYLE_NORMAL);
     start_calibration();  
   }
 }
@@ -576,7 +604,7 @@ void setup()
   Serial1.begin(9600);
 
   DEBUGLN("NEO-6M 1PPS IRQ setup...");
-  pinMode(GPS_PPS_PIN, INPUT_PULLUP);
+  pinMode(GPS_PPS_PIN, INPUT);
 
   DEBUGLN("SSD1306 setup...");
   ssd1306_128x64_i2c_init();
@@ -585,6 +613,7 @@ void setup()
   ssd1306_clearScreen();
 
   DEBUGLN("Si5351 setup...");
+  pinMode(CAL_SIGNAL_PIN, INPUT);
   // Initialize the Si5351
   // Change the 2nd parameter in init if using a ref osc other than 25 MHz
   si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, cal_factor);
@@ -604,8 +633,8 @@ void setup()
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
 
-  DEBUGLN("Configure TimerB...");
-  config_timer();
+//  DEBUGLN("Configure TimerB...");
+//  config_timer();
 
   DEBUGLN("Done...");
 }
@@ -656,8 +685,4 @@ void loop()
       show_status_screen();
       break;
   }
-
-  DEBUG("freq_counter:");
-  DEBUGLN(freq_counter);
-  delay(1000);
 }
