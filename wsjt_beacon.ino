@@ -167,6 +167,7 @@ uint8_t cur_screen = SCREEN_STATUS;
 bool edit_mode = false;
 
 #define CAL_FREQ 250000000UL
+#define CAL_TIME_SECONDS 20UL
 volatile uint32_t cal_counter = 0;
 volatile uint8_t cal_timeout = 0;
 volatile bool start_cal = false;
@@ -294,7 +295,7 @@ static void pps_interrupt()
   {
     if (start_cal == true)
     {
-      cal_timeout = 20;
+      cal_timeout = CAL_TIME_SECONDS;
       start_cal = false;
     }
   }
@@ -347,7 +348,7 @@ static void start_calibration(void)
   detachInterrupt(digitalPinToInterrupt(CAL_SIGNAL_PIN));
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
-  cal_factor = (CAL_FREQ - ((cal_counter / 20) * 100)) + cal_factor;
+  cal_factor = (CAL_FREQ - (cal_counter * (100 / CAL_TIME_SECONDS))) + cal_factor;
   cal_factor_valid = true;
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
@@ -396,6 +397,8 @@ static void switch_screen(void)
   
     if (prev_value != cur_value)
     {
+      DEBUG("Switching screen from ");
+      DEBUG(cur_screen);
       if (cur_value > prev_value)
       {
         cur_screen++;
@@ -412,6 +415,8 @@ static void switch_screen(void)
         }
         cur_screen--;
       }
+      DEBUG(" to ");
+      DEBUGLN(cur_screen);
       prev_value = cur_value;
     }  
   }
