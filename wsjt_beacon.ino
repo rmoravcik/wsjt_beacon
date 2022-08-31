@@ -162,7 +162,7 @@ uint8_t sel_freq = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
 
 static uint8_t tx_buffer[255];
-uint8_t cur_screen = SCREEN_STATUS;
+uint8_t cur_screen = SCREEN_COUNT;
 
 bool edit_mode = false;
 
@@ -387,43 +387,47 @@ static void display_frequency(const uint32_t value, const char *unit)
   ssd1306_printFixed(16,  24, text, STYLE_NORMAL);
 }
 
-static void switch_screen(void)
+static uint8_t get_next_screen(void)
 {
   static int16_t prev_value = 0;
+  uint8_t next_screen = cur_screen;
+
+  if (next_screen = SCREEN_COUNT)
+  {
+    return SCREEN_STATUS;
+  }
 
   if (edit_mode == false)
   {
     int16_t cur_value = encoder.getValue();
   
-      DEBUG("prev_value=");
-      DEBUG(prev_value);
-      DEBUG(" cur_value=");
-      DEBUGLN(cur_value);
+//      DEBUG("prev_value=");
+//      DEBUG(prev_value);
+//      DEBUG(" cur_value=");
+//      DEBUGLN(cur_value);
     if (prev_value != cur_value)
     {
-      DEBUG("Switching screen from ");
-      DEBUG(cur_screen);
       if (cur_value > prev_value)
       {
-        cur_screen++;
-        if (cur_screen == SCREEN_COUNT)
+        next_screen++;
+        if (next_screen == SCREEN_COUNT)
         {
-          cur_screen = SCREEN_STATUS;
+          next_screen = SCREEN_STATUS;
         }
       }
       else
       {
-        if (cur_screen == SCREEN_STATUS)
+        if (next_screen == SCREEN_STATUS)
         {
-          cur_screen = SCREEN_COUNT;
+          next_screen = SCREEN_COUNT;
         }
-        cur_screen--;
+        next_screen--;
       }
-      DEBUG(" to ");
-      DEBUGLN(cur_screen);
       prev_value = cur_value;
     }  
   }
+
+  return next_screen;
 }
 
 static int8_t check_value_changed(void)
@@ -605,10 +609,38 @@ static void show_calibration_screen(void)
   }
 }
 
+static void show_screen(void)
+{
+  uint8_t next_screen = get_next_screen();
+
+  if (next_screen != cur_screen)
+  {
+    switch (next_screen)
+    {
+      case SCREEN_SET_MODE:
+        show_set_mode_screen();
+        break;
+      case SCREEN_SET_FREQUENCY:
+        show_set_frequency_screen();
+        break;
+      case SCREEN_GPS_STATUS:
+        show_gps_status_screen();
+        break;
+      case SCREEN_CALIBRATION:
+        show_calibration_screen();
+        break;
+      default:
+        show_status_screen();
+        break;
+    }  
+
+    cur_screen = next_screen;
+  } 
+}
+
 void setup()
 {
   Serial.begin(115200);
-//  Wire.begin();
 
   DEBUGLN("Reading EEPROM configuration...");
   read_config();
@@ -647,15 +679,12 @@ void setup()
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
 
-//  DEBUGLN("Configure TimerB...");
-//  config_timer();
-
   DEBUGLN("Done...");
 }
  
 void loop()
 {
-  static uint32_t last_update = 0;
+//  static uint32_t last_update = 0;
 
   if (Serial1.available())
   {
@@ -680,30 +709,13 @@ void loop()
     delay(1000);
   }
 
-  switch_screen();
+  show_screen();
 
-  switch (cur_screen)
-  {
-    case SCREEN_SET_MODE:
-      show_set_mode_screen();
-      break;
-    case SCREEN_SET_FREQUENCY:
-      show_set_frequency_screen();
-      break;
-    case SCREEN_GPS_STATUS:
-      show_gps_status_screen();
-      break;
-    case SCREEN_CALIBRATION:
-      show_calibration_screen();
-      break;
-    default:
-      show_status_screen();
-      break;
-  }
+//  if ((millis() - last_update) > 1)
+//  {
+//    encoder.service();
+//    last_update = millis();
+//  }
 
-  if ((millis() - last_update) > 1)
-  {
-    encoder.service();
-    last_update = millis();
-  }
+  delay(20);
 }
