@@ -168,6 +168,7 @@ uint8_t cur_screen = SCREEN_COUNT;
 bool refresh_screen = false;
 
 bool edit_mode = false;
+bool edit_mode_blink_toggle = false;
 
 #define CAL_FREQ 250000000UL
 #define CAL_TIME_SECONDS 20UL
@@ -369,15 +370,22 @@ static void display_header(const char *text)
   ssd1306_printFixed(x, 0, text, STYLE_NORMAL);
 }
 
-static void display_footer(const char *text)
-{
-  uint8_t x = (ssd1306_displayWidth() - (6 * strlen(text))) / 2;
-  ssd1306_setFixedFont(ssd1306xled_font6x8);
-  ssd1306_printFixed(x, 56, text, STYLE_NORMAL);
-}
-
 static void display_mode(const char *text)
 {
+  if (edit_mode == true)
+  {
+    if (edit_mode_blink_toggle == true)
+    {
+       ssd1306_negativeMode();
+       edit_mode_blink_toggle = false;
+    }
+    else
+    {
+       ssd1306_positiveMode();
+       edit_mode_blink_toggle = true;
+    }
+  }
+
   ssd1306_setFixedFont(ssd1306xled_font8x16);
   ssd1306_printFixed(48, 24, text, STYLE_NORMAL);
 }
@@ -387,6 +395,20 @@ static void display_frequency(const uint32_t value, const char *unit)
   uint8_t freq1 = value / 1000000;
   uint16_t freq2 = (value / 100) % 1000;
   char text[13];
+
+  if (edit_mode == true)
+  {
+    if (edit_mode_blink_toggle == true)
+    {
+       ssd1306_negativeMode();
+       edit_mode_blink_toggle = false;
+    }
+    else
+    {
+       ssd1306_positiveMode();
+       edit_mode_blink_toggle = true;
+    }
+  }
 
   sprintf(text, "%3d.%04d %3s", freq1, freq2, unit);
 
@@ -447,9 +469,9 @@ static int8_t get_new_value(void)
     if (encoder_button.pressed())
     {
       DEBUGLN("Leaving edit mode");
-      display_footer("         ");
       write_config();
       edit_mode = false;
+      edit_mode_blink_toggle = false;
     }
 
     int32_t new_position = encoder.read();
@@ -472,7 +494,6 @@ static int8_t get_new_value(void)
     if (encoder_button.pressed())
     {
       DEBUGLN("Entering edit mode");
-      display_footer("Edit Mode");
       old_position = encoder.read();
       edit_mode = true;
     }
