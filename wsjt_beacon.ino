@@ -5,9 +5,10 @@
 #include <int.h>
 #include <TimeLib.h>
 #include <TinyGPS.h>
-#include <ClickEncoder.h>
+#include <Encoder.h>
 #include "ssd1306.h"
 #include <EEPROM.h>
+#include <Button.h>
 
 #include "config.h"
 
@@ -130,7 +131,7 @@ const uint32_t ft8_freqs[BAND_COUNT] = {
 };
 
 const struct mode_param mode_params[MODE_COUNT] {
- { "JT9",  JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
+ { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
  { "JT65", JT65_SYMBOL_COUNT, 269, 371, jt65_freqs },
 /*
  { "JT4",  JT4_SYMBOL_COUNT,  437, 229, NULL       },
@@ -142,7 +143,7 @@ const struct mode_param mode_params[MODE_COUNT] {
  { "FSQ4", 0,                 879, 222, NULL       },
  { "FSQ5", 0,                 879, 167, NULL       },
 */
- { "FT8",  FT8_SYMBOL_COUNT,  628, 159, ft8_freqs  }
+ { "FT8 ", FT8_SYMBOL_COUNT,  628, 159, ft8_freqs  }
 };
 
 #define GPS_PPS_PIN           10
@@ -156,13 +157,15 @@ const struct mode_param mode_params[MODE_COUNT] {
 Si5351 si5351;
 JTEncode jtencode;
 TinyGPS gps;
-ClickEncoder encoder(ENC_A_PIN, ENC_B_PIN, ENC_BUTTON_PIN, 4);
+Encoder encoder(ENC_A_PIN, ENC_B_PIN);
+Button encoder_button(ENC_BUTTON_PIN);
 
 uint8_t sel_freq = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
 
 static uint8_t tx_buffer[255];
 uint8_t cur_screen = SCREEN_COUNT;
+bool refresh_screen = false;
 
 bool edit_mode = false;
 
@@ -173,9 +176,6 @@ volatile uint8_t cal_timeout = 0;
 volatile bool start_cal = false;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
-//volatile bool cal_finished = true;
-//volatile uint32_t measured_freq = 0;
-//volatile uint32_t freq_counter = 0;
 
 static void read_config(void)
 {
@@ -369,6 +369,13 @@ static void display_header(const char *text)
   ssd1306_printFixed(x, 0, text, STYLE_NORMAL);
 }
 
+static void display_footer(const char *text)
+{
+  uint8_t x = (ssd1306_displayWidth() - (6 * strlen(text))) / 2;
+  ssd1306_setFixedFont(ssd1306xled_font6x8);
+  ssd1306_printFixed(x, 56, text, STYLE_NORMAL);
+}
+
 static void display_mode(const char *text)
 {
   ssd1306_setFixedFont(ssd1306xled_font8x16);
@@ -389,77 +396,84 @@ static void display_frequency(const uint32_t value, const char *unit)
 
 static uint8_t get_next_screen(void)
 {
-  static int16_t prev_value = 0;
+  static int32_t old_position = 0;
   uint8_t next_screen = cur_screen;
 
-  if (next_screen = SCREEN_COUNT)
+  if (next_screen == SCREEN_COUNT)
   {
     return SCREEN_STATUS;
   }
 
   if (edit_mode == false)
   {
-    int16_t cur_value = encoder.getValue();
+    int32_t new_position = encoder.read();
   
-//      DEBUG("prev_value=");
-//      DEBUG(prev_value);
-//      DEBUG(" cur_value=");
-//      DEBUGLN(cur_value);
-    if (prev_value != cur_value)
+    if (old_position != new_position)
     {
-      if (cur_value > prev_value)
+      if (new_position >= (old_position + 4))
       {
         next_screen++;
         if (next_screen == SCREEN_COUNT)
         {
           next_screen = SCREEN_STATUS;
         }
+        old_position = new_position;
       }
-      else
+      else if (new_position <= (old_position - 4))
       {
         if (next_screen == SCREEN_STATUS)
         {
           next_screen = SCREEN_COUNT;
         }
         next_screen--;
+        old_position = new_position;
       }
-      prev_value = cur_value;
     }  
+  }
+  else
+  {
+    old_position = encoder.read();
   }
 
   return next_screen;
 }
 
-static int8_t check_value_changed(void)
+static int8_t get_new_value(void)
 {
-  static int16_t prev_value = 0;
+  static int32_t old_position = 0;
   
   if (edit_mode == true)
   {
-    if (encoder.getButton() == ClickEncoder::Clicked)
+    if (encoder_button.pressed())
     {
+      DEBUGLN("Leaving edit mode");
+      display_footer("         ");
       write_config();
       edit_mode = false;
     }
 
-    int16_t cur_value = encoder.getValue();
-    if (cur_value != prev_value)
+    int32_t new_position = encoder.read();
+    if (new_position != old_position)
     {
-      if (cur_value > prev_value)
+      if (new_position >= (old_position + 4))
       {
+        old_position = new_position;
         return 1;
       }
-      else
+      else if (new_position <= (old_position - 4))
       {
+        old_position = new_position;
         return -1;
       }
-      prev_value = cur_value;
     }
   }
   else
   {
-    if (encoder.getButton() == ClickEncoder::Clicked)
+    if (encoder_button.pressed())
     {
+      DEBUGLN("Entering edit mode");
+      display_footer("Edit Mode");
+      old_position = encoder.read();
       edit_mode = true;
     }
   }  
@@ -471,6 +485,15 @@ static void show_status_screen(void)
 {
   char buf[6];
 
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    ssd1306_setFixedFont(ssd1306xled_font6x8);
+    ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
+    ssd1306_printFixed(104, 56,  loc, STYLE_NORMAL);
+    display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+  }
+
 //  display.drawTriangle(8, 0, 0, 8, 8, 8, SSD1306_WHITE);
 //  display.fillTriangle(4, 4, 0, 8, 4, 8, SSD1306_WHITE);
 //  display.drawRect(110, 0, 16, 8, SSD1306_WHITE);
@@ -481,22 +504,18 @@ static void show_status_screen(void)
   sprintf(buf, "%02d:%02d", hour(), minute());
   ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
-  ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
-  ssd1306_printFixed(104, 56,  loc, STYLE_NORMAL);
-
-  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 }
 
 static void show_set_mode_screen(void)
 {
-  int8_t value = check_value_changed();
+  int8_t value = get_new_value();
 
   if (value != 0)
   {
     if (value > 0)
     {
       cur_mode++;
-      if (cur_mode > MODE_COUNT)
+      if (cur_mode == MODE_COUNT)
       {
         cur_mode = 0;
       }
@@ -509,23 +528,28 @@ static void show_set_mode_screen(void)
       }
       cur_mode--;
     }
+    refresh_screen = true;
   }
 
-  ssd1306_clearScreen();
-  display_header("Mode");
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    display_header("Mode");
+  }
+
   display_mode(mode_params[cur_mode].mode_name);
 }
 
 static void show_set_frequency_screen(void)
 {
-  int8_t value = check_value_changed();
+  int8_t value = get_new_value();
 
   if (value != 0)
   {
     if (value > 0)
     {
       sel_freq++;
-      if (sel_freq > BAND_COUNT)
+      if (sel_freq == BAND_COUNT)
       {
         sel_freq = 0;
       }
@@ -538,10 +562,14 @@ static void show_set_frequency_screen(void)
       }
       sel_freq--;
     }
+    refresh_screen = true;
   }
 
-  ssd1306_clearScreen();
-  display_header("Frequency");
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    display_header("Frequency");
+  }
 
   display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 }
@@ -551,18 +579,21 @@ static void show_gps_status_screen(void)
   long lat, lon;
   unsigned long age;
   char buf[21];
-  
-  ssd1306_clearScreen();
-  display_header("GPS Status");
+
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    display_header("GPS Status");
+  }
 
   ssd1306_setFixedFont(ssd1306xled_font6x8);
 
   gps.get_position(&lat, &lon, &age);
 
-  sprintf(buf, "Sat.: %d", gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
+  sprintf(buf, "Sat.: %4d", gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
   ssd1306_printFixed( 0, 16, buf, STYLE_NORMAL);
 
-  sprintf(buf, "HDOP: %d", gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
+  sprintf(buf, "HDOP: %4d", gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
   ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
 
   int8_t lat1 = lat / 1000000;
@@ -575,7 +606,7 @@ static void show_gps_status_screen(void)
   sprintf(buf, "Lon.: %02d.%03d", lon1, lon2);
   ssd1306_printFixed( 0, 40, buf, STYLE_NORMAL);
 
-  sprintf(buf, "Age : %d", age);
+  sprintf(buf, "Age : %4d", age);
   ssd1306_printFixed( 0, 48, buf, STYLE_NORMAL);
 
 #if 0
@@ -590,10 +621,13 @@ static void show_gps_status_screen(void)
 
 static void show_calibration_screen(void)
 {
-  check_value_changed();
+  get_new_value();
   
-  ssd1306_clearScreen();
-  display_header("Calibration");
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    display_header("Calibration");
+  }
 
   ssd1306_setFixedFont(ssd1306xled_font8x16);
 
@@ -613,7 +647,7 @@ static void show_screen(void)
 {
   uint8_t next_screen = get_next_screen();
 
-  if (next_screen != cur_screen)
+  if ((next_screen != cur_screen) || (refresh_screen == true))
   {
     switch (next_screen)
     {
@@ -635,6 +669,7 @@ static void show_screen(void)
     }  
 
     cur_screen = next_screen;
+    refresh_screen = false;
   } 
 }
 
@@ -679,12 +714,15 @@ void setup()
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
 
+  DEBUGLN("Encoder setup...");
+  encoder_button.begin();
+
   DEBUGLN("Done...");
 }
  
 void loop()
 {
-//  static uint32_t last_update = 0;
+  static uint32_t last_update = 0;
 
   if (Serial1.available())
   {
@@ -711,11 +749,11 @@ void loop()
 
   show_screen();
 
-//  if ((millis() - last_update) > 1)
-//  {
-//    encoder.service();
-//    last_update = millis();
-//  }
+  if ((millis() - last_update) > 1000)
+  {
+    refresh_screen = true;
+    last_update = millis();
+  }
 
   delay(20);
 }
