@@ -390,7 +390,7 @@ static void display_mode(const char *text)
 
 static void display_frequency(const uint32_t value, const char *unit)
 {
-  uint8_t freq1 = value / 1000000;
+  uint16_t freq1 = value / 1000000;
   uint16_t freq2 = (value / 100) % 1000;
   char text[13];
 
@@ -644,14 +644,14 @@ static void show_gps_status_screen(void)
   sprintf(buf, "Sat.: %4d", gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
   ssd1306_printFixed( 0, 16, buf, STYLE_NORMAL);
 
-  int32_t lat1 = lat / 1000000;
-  int32_t lat2 = (lat / 1000) % 1000;
-  sprintf(buf, "Lat.: %02ld.%03ld", lat1, lat2);
+  int16_t lat1 = lat / 1000000;
+  int16_t lat2 = (lat / 1000) % 1000;
+  sprintf(buf, "Lat.: %02d.%03d", lat1, lat2);
   ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
 
-  int32_t lon1 = lon / 1000000;
-  int32_t lon2 = (lon / 1000) % 1000;
-  sprintf(buf, "Lon.: %02ld.%03ld", lon1, lon2);
+  int16_t lon1 = lon / 1000000;
+  int16_t lon2 = (lon / 1000) % 1000;
+  sprintf(buf, "Lon.: %02d.%03d", lon1, lon2);
   ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
 
   sprintf(buf, "Age : %4ld", age);
