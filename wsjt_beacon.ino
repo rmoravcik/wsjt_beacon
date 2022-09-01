@@ -204,6 +204,10 @@ static void encode(char *tx_buffer)
 {
   uint8_t i;
 
+  ssd1306_setFixedFont(ssd1306xled_font6x8);
+  ssd1306_negativeMode();
+  ssd1306_printFixed(52, 8, " TX ", STYLE_NORMAL);
+
   // Reset the tone to the base frequency and turn on the output
   si5351.output_enable(SI5351_CLK0, 1);
     
@@ -227,6 +231,9 @@ static void encode(char *tx_buffer)
 
   // Turn off the output
   si5351.output_enable(SI5351_CLK0, 0);
+
+  ssd1306_positiveMode();
+  ssd1306_printFixed(52, 8, "    ", STYLE_NORMAL);
 }
 
 static void set_tx_buffer(char *tx_buffer)
@@ -329,7 +336,7 @@ static void config_timer(void)
 }
 #endif
 
-static void start_calibration(void)
+static void do_calibration(void)
 {
   cal_counter = 0;
   cal_timeout = 0;
@@ -350,24 +357,25 @@ static void start_calibration(void)
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
   cal_factor = (CAL_FREQ - (cal_counter * (100 / CAL_TIME_SECONDS))) + cal_factor;
-  cal_factor_valid = true;
+  if ((cal_factor < 50000) && (cal_factor > -50000))
+  {
+    cal_factor_valid = true;
+  }
+  else
+  {
+    cal_factor = 0;
+  }
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
 
-  si5351.output_enable(SI5351_CLK0, 1);
   si5351.output_enable(SI5351_CLK2, 0);
-}
-
-static void stop_calibration(void)
-{
-  si5351.output_enable(SI5351_CLK0, 0);
 }
 
 static void display_header(const char *text)
 {
   uint8_t x = (ssd1306_displayWidth() - (6 * strlen(text))) / 2;
   ssd1306_setFixedFont(ssd1306xled_font6x8);
-  ssd1306_printFixed(x, 0, text, STYLE_NORMAL);
+  ssd1306_printFixed(x, 0, text, STYLE_BOLD);
 }
 
 static void display_mode(const char *text)
@@ -502,6 +510,30 @@ static int8_t get_new_value(void)
   return 0;
 }
 
+static void draw_battery(const uint8_t capacity)
+{
+  ssd1306_drawRect(110, 0, 125, 8);
+  ssd1306_drawRect(126, 2, 127, 6);
+
+  if (capacity > 75)
+  {
+    ssd1306_fillRect(111, 0, 124, 8);
+  }
+  else if (capacity > 50)
+  {
+    ssd1306_fillRect(111, 0, 121, 8);
+  }
+  else if (capacity > 25)
+  {
+    ssd1306_fillRect(111, 0, 117, 8);
+
+  }
+  else if (capacity > 0)
+  {
+    ssd1306_fillRect(111, 0, 113, 8);    
+  }
+}
+
 static void show_status_screen(void)
 {
   char buf[6];
@@ -511,7 +543,8 @@ static void show_status_screen(void)
     ssd1306_clearScreen();
     ssd1306_setFixedFont(ssd1306xled_font6x8);
     ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
-    ssd1306_printFixed(104, 56,  loc, STYLE_NORMAL);
+    ssd1306_printFixed( 52, 56, mode_params[cur_mode].mode_name, STYLE_NORMAL);
+    ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
     display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
   }
 
@@ -525,6 +558,7 @@ static void show_status_screen(void)
   sprintf(buf, "%02d:%02d", hour(), minute());
   ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
+  draw_battery(50);
 }
 
 static void show_set_mode_screen(void)
@@ -654,13 +688,17 @@ static void show_calibration_screen(void)
 
   if (edit_mode == false)
   {
-    ssd1306_printFixed(36,  24, "Disabled", STYLE_NORMAL);  
-    stop_calibration();
+    char buf[15];
+    sprintf(buf, "Factor:%7d", cal_factor);
+    ssd1306_printFixed(8,  24, buf, STYLE_NORMAL);  
+    si5351.output_enable(SI5351_CLK0, 0);
   }
   else
   {
-    ssd1306_printFixed(36,  24, "Enabled ", STYLE_NORMAL);
-    start_calibration();  
+    ssd1306_printFixed(8,  24, "Calibrating...", STYLE_NORMAL);
+    do_calibration();  
+    ssd1306_printFixed(8,  24, "  Disable TX  ", STYLE_NORMAL);
+    si5351.output_enable(SI5351_CLK0, 1);
   }
 }
 
@@ -754,7 +792,7 @@ void loop()
   {
     if (cal_factor_valid == false)
     {
-      start_calibration();
+      do_calibration();
     }
   }
 
