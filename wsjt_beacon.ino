@@ -448,6 +448,7 @@ static uint8_t get_next_screen(void)
           next_screen = SCREEN_STATUS;
         }
         old_position = new_position;
+        refresh_screen = false;
       }
       else if (new_position <= (old_position - 4))
       {
@@ -457,6 +458,7 @@ static uint8_t get_next_screen(void)
         }
         next_screen--;
         old_position = new_position;
+        refresh_screen = false;
       }
     }  
   }
@@ -510,6 +512,12 @@ static int8_t get_new_value(void)
   return 0;
 }
 
+static void draw_gps_symbol(void)
+{
+  uint8_t gps[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
+  ssd1306_drawBuffer(0, 0, 8, 8, gps);
+}
+
 static void draw_battery(const uint8_t capacity)
 {
   ssd1306_drawRect(110, 0, 125, 8);
@@ -546,12 +554,8 @@ static void show_status_screen(void)
     ssd1306_printFixed( 52, 56, mode_params[cur_mode].mode_name, STYLE_NORMAL);
     ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
     display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+    draw_gps_symbol();
   }
-
-//  display.drawTriangle(8, 0, 0, 8, 8, 8, SSD1306_WHITE);
-//  display.fillTriangle(4, 4, 0, 8, 4, 8, SSD1306_WHITE);
-//  display.drawRect(110, 0, 16, 8, SSD1306_WHITE);
-//  display.drawRect(126, 2, 2, 4, SSD1306_WHITE);
 
   ssd1306_setFixedFont(ssd1306xled_font6x8);
 
@@ -631,6 +635,8 @@ static void show_set_frequency_screen(void)
 
 static void show_gps_status_screen(void)
 {
+  int Year;
+  byte Month, Day, Hour, Minute, Second;
   long lat, lon;
   unsigned long age;
   char buf[21];
@@ -648,34 +654,30 @@ static void show_gps_status_screen(void)
   sprintf(buf, "Sat.: %4d", gps.satellites() == TinyGPS::GPS_INVALID_SATELLITES ? 0 : gps.satellites());
   ssd1306_printFixed( 0, 16, buf, STYLE_NORMAL);
 
-  sprintf(buf, "HDOP: %4d", gps.hdop() == TinyGPS::GPS_INVALID_HDOP ? 0 : gps.hdop());
+  int32_t lat1 = lat / 1000000;
+  int32_t lat2 = (lat / 1000) % 1000;
+  sprintf(buf, "Lat.: %02d.%03u", lat1, lat2);
   ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
 
-  int8_t lat1 = lat / 1000000;
-  int8_t lat2 = (lat / 1000) % 1000;
-  sprintf(buf, "Lat.: %02d.%03d", lat1, lat2);
+  int32_t lon1 = lon / 1000000;
+  int32_t lon2 = (lon / 1000) % 1000;
+  sprintf(buf, "Lon.: %02d.%03u", lon1, lon2);
   ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
 
-  int8_t lon1 = lon / 1000000;
-  int8_t lon2 = (lon / 1000) % 1000;
-  sprintf(buf, "Lon.: %02d.%03d", lon1, lon2);
+  sprintf(buf, "Age : %4d", age);
   ssd1306_printFixed( 0, 40, buf, STYLE_NORMAL);
 
-  sprintf(buf, "Age : %4d", age);
-  ssd1306_printFixed( 0, 48, buf, STYLE_NORMAL);
-
-#if 0
-  int Year;
-  byte Month, Day, Hour, Minute, Second;
-
   gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, NULL);
-  sprintf(buf, "Time: %02u.%02u.%04u %02u:%02u:%02u", Day, Month, Year, Hour, Minute, Second);
-  ssd1306_printFixed( 0, 54, buf, STYLE_NORMAL);
-#endif
+  sprintf(buf, "Time: %02u:%02u:%02u", Hour, Minute, Second);
+  ssd1306_printFixed( 0, 48, buf, STYLE_NORMAL);
+  sprintf(buf, "Date: %02u.%02u.%04u", Day, Month, Year);
+  ssd1306_printFixed( 0, 56, buf, STYLE_NORMAL);
 }
 
 static void show_calibration_screen(void)
 {
+  static bool waiting_to_disable = false;
+  
   get_new_value();
   
   if (refresh_screen == false)
@@ -695,10 +697,14 @@ static void show_calibration_screen(void)
   }
   else
   {
-    ssd1306_printFixed(8,  24, "Calibrating...", STYLE_NORMAL);
-    do_calibration();  
+    if (waiting_to_disable == false)
+    {
+      ssd1306_printFixed(8,  24, "Calibrating...", STYLE_NORMAL);
+      do_calibration();  
+      si5351.output_enable(SI5351_CLK0, 1);
+      waiting_to_disable = true;
+    }
     ssd1306_printFixed(8,  24, "  Disable TX  ", STYLE_NORMAL);
-    si5351.output_enable(SI5351_CLK0, 1);
   }
 }
 
