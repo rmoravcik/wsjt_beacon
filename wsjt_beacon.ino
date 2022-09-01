@@ -359,10 +359,14 @@ static void do_calibration(void)
   cal_factor = (CAL_FREQ - (cal_counter * (100 / CAL_TIME_SECONDS))) + cal_factor;
   if ((cal_factor < 50000) && (cal_factor > -50000))
   {
+    DEBUG("Calibration factor ");
+    DEBUGLN(cal_factor);
     cal_factor_valid = true;
   }
   else
   {
+    DEBUG("Calibration factor invalid! ");
+    DEBUGLN(cal_factor);
     cal_factor = 0;
   }
 
@@ -769,12 +773,14 @@ void setup()
   // Set for max power
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
   // Disable the clock initially
-  si5351.set_clock_pwr(SI5351_CLK0, 0);
+  //si5351.set_clock_pwr(SI5351_CLK0, 0);
+  si5351.output_enable(SI5351_CLK0, 0);
 
   // Set CLK2 output
   si5351.set_freq(CAL_FREQ, SI5351_CLK2);
   // Disable the clock initially
-  si5351.set_clock_pwr(SI5351_CLK2, 0);
+  //si5351.set_clock_pwr(SI5351_CLK2, 0);
+  si5351.output_enable(SI5351_CLK2, 0);
 
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
