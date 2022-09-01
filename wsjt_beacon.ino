@@ -71,7 +71,7 @@ struct mode_param {
   uint16_t symbol_count;
   uint16_t tone_spacing;
   uint16_t tone_delay;
-  uint32_t *freqs;
+  const uint32_t *freqs;
 };
 
 const uint32_t jt9_freqs[BAND_COUNT] = {
@@ -200,7 +200,7 @@ static void write_config(void)
 }
 
 // Loop through the string, transmitting one character at a time.
-static void encode(char *tx_buffer)
+static void encode(uint8_t *tx_buffer)
 {
   uint8_t i;
 
@@ -209,7 +209,7 @@ static void encode(char *tx_buffer)
   ssd1306_printFixed(52, 8, " TX ", STYLE_NORMAL);
 
   // Reset the tone to the base frequency and turn on the output
-  si5351.output_enable(SI5351_CLK0, 1);
+  si5351.set_clock_pwr(SI5351_CLK0, 1);
     
 /*
   // Now transmit the channel symbols
@@ -230,13 +230,13 @@ static void encode(char *tx_buffer)
   }
 
   // Turn off the output
-  si5351.output_enable(SI5351_CLK0, 0);
+  si5351.set_clock_pwr(SI5351_CLK0, 0);
 
   ssd1306_positiveMode();
   ssd1306_printFixed(52, 8, "    ", STYLE_NORMAL);
 }
 
-static void set_tx_buffer(char *tx_buffer)
+static void set_tx_buffer(uint8_t *tx_buffer)
 {
   // Clear out the transmit buffer
   memset(tx_buffer, 0, 255);
@@ -317,41 +317,26 @@ static void cal_signal_interrupt()
   }
 }
 
-#if 0
-ISR(TCB0_INT_vect)
-{
-  freq_counter += TCB0.CCMP;
-}
-
-static void config_timer(void)
-{
-  EVSYS.CHANNEL4 = EVSYS_GENERATOR_PORT1_PIN4_gc;
-  EVSYS.USERTCB0 = EVSYS_CHANNEL_CHANNEL4_gc;
-
-  TCB0.CTRLA = 0;
-  TCB0.CTRLB = TCB_CNTMODE_FRQ_gc;
-  TCB0.EVCTRL = TCB_CAPTEI_bm | TCB_EDGE_bp;
-  TCB0.INTCTRL = TCB_CAPT_bm;
-  TCB0.CTRLA = TCB_CLKSEL_CLKDIV2_gc | TCB_ENABLE_bm | TCB_RUNSTDBY_bm;
-}
-#endif
-
 static void do_calibration(void)
 {
   cal_counter = 0;
   cal_timeout = 0;
   start_cal = false;
 
+  DEBUG("Calibration started");
+
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
   attachInterrupt(digitalPinToInterrupt(CAL_SIGNAL_PIN), cal_signal_interrupt, RISING);
 
-  si5351.output_enable(SI5351_CLK2, 1);
+  si5351.set_clock_pwr(SI5351_CLK2, 1);
 
   start_cal = true;
 
   do {
-    delay(100);
+    delay(1000);
+    DEBUG(".");
   } while (cal_timeout > 0);
+  DEBUGLN("");
 
   detachInterrupt(digitalPinToInterrupt(CAL_SIGNAL_PIN));
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
@@ -359,20 +344,21 @@ static void do_calibration(void)
   cal_factor = (CAL_FREQ - (cal_counter * (100 / CAL_TIME_SECONDS))) + cal_factor;
   if ((cal_factor < 50000) && (cal_factor > -50000))
   {
-    DEBUG("Calibration factor ");
+    DEBUG("Calibration finished. factor=");
     DEBUGLN(cal_factor);
     cal_factor_valid = true;
   }
   else
   {
-    DEBUG("Calibration factor invalid! ");
-    DEBUGLN(cal_factor);
+    DEBUG("Calibration factor=");
+    DEBUG(cal_factor);
+    DEBUGLN(" invalid!");
     cal_factor = 0;
   }
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
 
-  si5351.output_enable(SI5351_CLK2, 0);
+  si5351.set_clock_pwr(SI5351_CLK2, 0);
 }
 
 static void display_header(const char *text)
@@ -660,15 +646,15 @@ static void show_gps_status_screen(void)
 
   int32_t lat1 = lat / 1000000;
   int32_t lat2 = (lat / 1000) % 1000;
-  sprintf(buf, "Lat.: %02d.%03u", lat1, lat2);
+  sprintf(buf, "Lat.: %02ld.%03ld", lat1, lat2);
   ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
 
   int32_t lon1 = lon / 1000000;
   int32_t lon2 = (lon / 1000) % 1000;
-  sprintf(buf, "Lon.: %02d.%03u", lon1, lon2);
+  sprintf(buf, "Lon.: %02ld.%03ld", lon1, lon2);
   ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
 
-  sprintf(buf, "Age : %4d", age);
+  sprintf(buf, "Age : %4ld", age);
   ssd1306_printFixed( 0, 40, buf, STYLE_NORMAL);
 
   gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, NULL);
@@ -695,9 +681,9 @@ static void show_calibration_screen(void)
   if (edit_mode == false)
   {
     char buf[15];
-    sprintf(buf, "Factor:%7d", cal_factor);
+    sprintf(buf, "Factor:%7ld", cal_factor);
     ssd1306_printFixed(8,  24, buf, STYLE_NORMAL);  
-    si5351.output_enable(SI5351_CLK0, 0);
+    si5351.set_clock_pwr(SI5351_CLK0, 0);
   }
   else
   {
@@ -705,7 +691,7 @@ static void show_calibration_screen(void)
     {
       ssd1306_printFixed(8,  24, "Calibrating...", STYLE_NORMAL);
       do_calibration();  
-      si5351.output_enable(SI5351_CLK0, 1);
+      si5351.set_clock_pwr(SI5351_CLK0, 1);
       waiting_to_disable = true;
     }
     ssd1306_printFixed(8,  24, "  Disable TX  ", STYLE_NORMAL);
@@ -772,15 +758,15 @@ void setup()
   si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * 100, SI5351_CLK0);
   // Set for max power
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
-  // Disable the clock initially
-  //si5351.set_clock_pwr(SI5351_CLK0, 0);
-  si5351.output_enable(SI5351_CLK0, 0);
 
   // Set CLK2 output
   si5351.set_freq(CAL_FREQ, SI5351_CLK2);
+
   // Disable the clock initially
-  //si5351.set_clock_pwr(SI5351_CLK2, 0);
-  si5351.output_enable(SI5351_CLK2, 0);
+  for (int i = SI5351_CLK0; i <= SI5351_CLK7; i++)
+  {
+    si5351.set_clock_pwr((enum si5351_clock) i, 0);    
+  }
 
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
@@ -812,7 +798,7 @@ void loop()
   // WSPR should start on the 1st second of the minute, but there's a slight delay
   // in this code because it is limited to 1 second resolution.
   // if(timeSet && timeStatus() == timeSet && minute() % 2 == 0 && second() == 0)
-  if (timeSet && timeStatus() == timeSet && (minute() % 10 == 0 || minute() % 10 == 4) && second() == 0)
+  if (timeStatus() == timeSet && (minute() % 10 == 0 || minute() % 10 == 4) && second() == 0)
   {
     encode(tx_buffer);
     delay(1000);
