@@ -758,15 +758,14 @@ void setup()
   si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * 100, SI5351_CLK0);
   // Set for max power
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
+  // Disable the clock initially
+  si5351.set_clock_pwr(SI5351_CLK0, 0);
 
   // Set CLK2 output
+  si5351.set_ms_source(SI5351_CLK2, SI5351_PLLB);
   si5351.set_freq(CAL_FREQ, SI5351_CLK2);
-
   // Disable the clock initially
-  for (int i = SI5351_CLK0; i <= SI5351_CLK7; i++)
-  {
-    si5351.set_clock_pwr((enum si5351_clock) i, 0);    
-  }
+  si5351.set_clock_pwr(SI5351_CLK2, 0);
 
   DEBUGLN("Setting TX buffer...");
   set_tx_buffer(tx_buffer);
