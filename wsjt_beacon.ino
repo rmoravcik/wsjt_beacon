@@ -25,12 +25,15 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
+#define VERSION_STRING   "v0.9.0"
+
 enum screen {
   SCREEN_STATUS = 0,
   SCREEN_SET_MODE,
   SCREEN_SET_FREQUENCY,
   SCREEN_GPS_STATUS,
   SCREEN_CALIBRATION,
+  SCREEN_VERSION,
   SCREEN_COUNT
 };
 
@@ -698,6 +701,17 @@ static void show_calibration_screen(void)
   }
 }
 
+static void show_version_screen(void)
+{
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    display_header("Version");
+    ssd1306_setFixedFont(ssd1306xled_font8x16);
+    ssd1306_printFixed(40,  24, VERSION_STRING, STYLE_NORMAL);
+  }
+}
+
 static void show_screen(void)
 {
   uint8_t next_screen = get_next_screen();
@@ -717,6 +731,9 @@ static void show_screen(void)
         break;
       case SCREEN_CALIBRATION:
         show_calibration_screen();
+        break;
+      case SCREEN_VERSION:
+        show_version_screen();
         break;
       default:
         show_status_screen();
