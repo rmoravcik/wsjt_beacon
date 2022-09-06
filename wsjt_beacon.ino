@@ -175,9 +175,9 @@ bool edit_mode_blink_toggle = false;
 
 #define CAL_FREQ 250000000UL
 #define CAL_TIME_SECONDS 20UL
-volatile uint32_t cal_counter = 0;
-volatile uint8_t cal_timeout = 0;
-volatile bool start_cal = false;
+volatile uint32_t timer0_ovf_counter = 0;
+volatile uint16_t timer0_count = 0;
+volatile uint8_t cal_timeout = CAL_TIME_SECONDS;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
 
@@ -298,53 +298,98 @@ static void process_sync_message()
 
 static void pps_interrupt()
 {
-  if (cal_timeout > 0)
+  if (cal_timeout == 0)
   {
-    cal_timeout--;
+    TCA0.SINGLE.CTRLA = 0;
+    TCA0.SINGLE.CNT = 0;
+    TCA0.SINGLE.EVCTRL = TCA_SINGLE_EVACT_POSEDGE_gc | TCA_SINGLE_CNTEI_bm;
+    timer0_ovf_counter = 0;
   }
-  else
+  else if (cal_timeout == CAL_TIME_SECONDS)
   {
-    if (start_cal == true)
-    {
-      cal_timeout = CAL_TIME_SECONDS;
-      start_cal = false;
-    }
+    timer0_count = TCA0.SINGLE.CNT;
+    TCA0.SINGLE.EVCTRL = 0;
+    TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV64_gc | TCA_SINGLE_ENABLE_bm;
   }
+  cal_timeout++;
 }
 
-static void cal_signal_interrupt()
+ISR(TCA0_OVF_vect)
 {
-  if (cal_timeout > 0)
-  {
-    cal_counter++;
-  }
+  timer0_ovf_counter++;
+// REMOVE ME
+#if 1
+  digitalWrite(12, !digitalRead(12));
+#endif
+  TCA0.SINGLE.INTFLAGS = TCA_SINGLE_OVF_bm;
+}
+
+static void init_tca0(void)
+{
+  EVSYS.CHANNEL4 = EVSYS_GENERATOR_PORT1_PIN4_gc;
+  EVSYS.USERTCA0 = EVSYS_CHANNEL_CHANNEL4_gc;
+
+  TCA0.SINGLE.CTRLB = 0;
+  TCA0.SINGLE.CTRLC = 0;
+  TCA0.SINGLE.CTRLD = 0;
+  TCA0.SINGLE.PER = 0xFFFF;
+  TCA0.SINGLE.CMP0BUF = 0;
+  TCA0.SINGLE.CMP1BUF = 0;
+  TCA0.SINGLE.CMP2BUF = 0;
+  TCA0.SINGLE.INTCTRL = TCA_SINGLE_OVF_bm;
+
+// REMOVE ME
+#if 1
+  pinMode(12, OUTPUT);
+  Serial.print("EVSYS.CHANNEL0="); Serial.println(EVSYS.CHANNEL0, HEX);
+  Serial.print("EVSYS.CHANNEL1="); Serial.println(EVSYS.CHANNEL1, HEX);
+  Serial.print("EVSYS.CHANNEL2="); Serial.println(EVSYS.CHANNEL2, HEX);
+  Serial.print("EVSYS.CHANNEL3="); Serial.println(EVSYS.CHANNEL3, HEX);
+  Serial.print("EVSYS.CHANNEL4="); Serial.println(EVSYS.CHANNEL4, HEX);
+  Serial.print("EVSYS.CHANNEL5="); Serial.println(EVSYS.CHANNEL5, HEX);
+  Serial.print("EVSYS.CHANNEL6="); Serial.println(EVSYS.CHANNEL6, HEX);
+  Serial.print("EVSYS.CHANNEL7="); Serial.println(EVSYS.CHANNEL7, HEX);
+  Serial.print("TCA0.SINGLE.CTRLA="); Serial.println(TCA0.SINGLE.CTRLA, HEX);
+  Serial.print("TCA0.SINGLE.CTRLB="); Serial.println(TCA0.SINGLE.CTRLB, HEX);
+  Serial.print("TCA0.SINGLE.CTRLC="); Serial.println(TCA0.SINGLE.CTRLC, HEX);
+  Serial.print("TCA0.SINGLE.CTRLD="); Serial.println(TCA0.SINGLE.CTRLD, HEX);
+  Serial.print("TCA0.SINGLE.CTRLECLR="); Serial.println(TCA0.SINGLE.CTRLECLR, HEX);
+  Serial.print("TCA0.SINGLE.CTRLESET="); Serial.println(TCA0.SINGLE.CTRLESET, HEX);
+  Serial.print("TCA0.SINGLE.CTRLFCLR="); Serial.println(TCA0.SINGLE.CTRLFCLR, HEX);
+  Serial.print("TCA0.SINGLE.CTRLFSET="); Serial.println(TCA0.SINGLE.CTRLFSET, HEX);
+  Serial.print("TCA0.SINGLE.EVCTRL="); Serial.println(TCA0.SINGLE.EVCTRL, HEX);
+  Serial.print("TCA0.SINGLE.INTCTRL="); Serial.println(TCA0.SINGLE.INTCTRL, HEX);
+  Serial.print("TCA0.SINGLE.CNT="); Serial.println(TCA0.SINGLE.CNT, HEX);
+#endif
 }
 
 static void do_calibration(void)
 {
-  cal_counter = 0;
   cal_timeout = 0;
-  start_cal = false;
 
   DEBUG("Calibration started");
 
+// REMOVE ME
+#if 1
+  TCA0.SINGLE.CTRLA = 0;
+  TCA0.SINGLE.CNT = 0;
+  TCA0.SINGLE.EVCTRL = TCA_SINGLE_EVACT_POSEDGE_gc | TCA_SINGLE_CNTEI_bm;
+#endif
+
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
-  attachInterrupt(digitalPinToInterrupt(CAL_SIGNAL_PIN), cal_signal_interrupt, RISING);
 
   si5351.set_clock_pwr(SI5351_CLK2, 1);
-
-  start_cal = true;
 
   do {
     delay(1000);
     DEBUG(".");
-  } while (cal_timeout > 0);
+    DEBUGLN(timer0_ovf_counter);
+  } while (cal_timeout < CAL_TIME_SECONDS);
   DEBUGLN("");
 
-  detachInterrupt(digitalPinToInterrupt(CAL_SIGNAL_PIN));
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
-  cal_factor = (CAL_FREQ - (cal_counter * (100 / CAL_TIME_SECONDS))) + cal_factor;
+  cal_factor = (CAL_FREQ - (((timer0_ovf_counter * 0x10000) + timer0_count) / CAL_TIME_SECONDS)) + cal_factor;
   if ((cal_factor < 50000) && (cal_factor > -50000))
   {
     DEBUG("Calibration finished. factor=");
@@ -756,7 +801,7 @@ void setup()
   Serial1.begin(9600);
 
   DEBUGLN("NEO-6M 1PPS IRQ setup...");
-  pinMode(GPS_PPS_PIN, INPUT);
+  pinMode(GPS_PPS_PIN, INPUT_PULLUP);
 
   DEBUGLN("SSD1306 setup...");
   ssd1306_128x64_i2c_init();
@@ -781,6 +826,8 @@ void setup()
   // Set CLK2 output
   si5351.set_ms_source(SI5351_CLK2, SI5351_PLLB);
   si5351.set_freq(CAL_FREQ, SI5351_CLK2);
+  // Set for max power
+  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
   // Disable the clock initially
   si5351.set_clock_pwr(SI5351_CLK2, 0);
 
@@ -789,6 +836,9 @@ void setup()
 
   DEBUGLN("Encoder setup...");
   encoder_button.begin();
+
+  DEBUGLN("Initialize TIMER A...");
+  init_tca0();
 
   DEBUGLN("Done...");
 }
