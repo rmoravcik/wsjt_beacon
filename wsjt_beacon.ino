@@ -11,6 +11,7 @@
 #include <Button.h>
 
 #include "config.h"
+#include "priv_types.h"
 
 #define DEBUG_TRACES     1
 
@@ -26,112 +27,6 @@
 #define EEPROM_FREQUENCY 1
 
 #define VERSION_STRING   "v0.9.0"
-
-enum screen {
-  SCREEN_STATUS = 0,
-  SCREEN_SET_MODE,
-  SCREEN_SET_FREQUENCY,
-  SCREEN_GPS_STATUS,
-  SCREEN_CALIBRATION,
-  SCREEN_VERSION,
-  SCREEN_COUNT
-};
-
-enum mode {
-  MODE_JT9 = 0,
-  MODE_JT65,
-/*  
-  MODE_JT4,
-*/
-  MODE_WSPR,
-/*
-  MODE_FSQ_2,
-  MODE_FSQ_3,
-  MODE_FSQ_4_5,
-  MODE_FSQ_6,
-*/
-  MODE_FT8,
-  MODE_COUNT
-};
-
-enum band {
-  BAND_160M = 0,
-  BAND_80M,
-  BAND_40M,
-  BAND_30M,
-  BAND_20M,
-  BAND_17M,
-  BAND_15M,
-  BAND_12M,
-  BAND_10M,
-  BAND_6M,
-  BAND_2M,
-  BAND_COUNT
-};
-
-struct mode_param {
-  const char mode_name[5];
-  uint16_t symbol_count;
-  uint16_t tone_spacing;
-  uint16_t tone_delay;
-  const uint32_t *freqs;
-};
-
-const uint32_t jt9_freqs[BAND_COUNT] = {
-    1836600UL,
-    3568600UL,
-    7038600UL,
-   10138700UL,
-   14095600UL,
-   18104600UL,
-   21094600UL,
-   24924600UL,
-   28124600UL,
-   50293000UL,
-  144489000UL
-};
-
-const uint32_t jt65_freqs[BAND_COUNT] = {
-    1836600UL,
-    3568600UL,
-    7038600UL,
-   10138700UL,
-   14095600UL,
-   18104600UL,
-   21094600UL,
-   24924600UL,
-   28124600UL,
-   50293000UL,
-  144489000UL
-};
-
-const uint32_t wspr_freqs[BAND_COUNT] = {
-    1836600UL,
-    3568600UL,
-    7038600UL,
-   10138700UL,
-   14095600UL,
-   18104600UL,
-   21094600UL,
-   24924600UL,
-   28124600UL,
-   50293000UL,
-  144489000UL
-};
-
-const uint32_t ft8_freqs[BAND_COUNT] = {
-    1836600UL,
-    3568600UL,
-    7038600UL,
-   10138700UL,
-   14095600UL,
-   18104600UL,
-   21094600UL,
-   24924600UL,
-   28124600UL,
-   50293000UL,
-  144489000UL
-};
 
 const struct mode_param mode_params[MODE_COUNT] {
  { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
@@ -180,6 +75,8 @@ volatile uint16_t timer0_count = 0;
 volatile uint8_t cal_timeout = CAL_TIME_SECONDS;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
+
+typedef void (*cal_refresh_cb)(void);
 
 static void read_config(void)
 {
@@ -332,8 +229,9 @@ static void init_evsys(void)
 
 }
 
-static void do_calibration(void)
+static void do_calibration(cal_refresh_cb cb)
 {
+  uint8_t prev_cal_timeout = CAL_TIME_SECONDS;
   cal_timeout = 0;
 
   DEBUG("Calibration started");
@@ -352,9 +250,14 @@ static void do_calibration(void)
   si5351.set_clock_pwr(SI5351_CLK2, 1);
 
   do {
-    delay(1000);
-    DEBUG(".");
-    DEBUGLN(timer0_ovf_counter);
+    if (prev_cal_timeout != cal_timeout)
+    {
+      DEBUG(".");
+      if (cb != NULL)
+      {
+        (*cb)();
+      }
+    }
   } while (cal_timeout < CAL_TIME_SECONDS);
   DEBUGLN("");
 
@@ -692,6 +595,25 @@ static void show_gps_status_screen(void)
   ssd1306_printFixed( 0, 56, buf, STYLE_NORMAL);
 }
 
+static void calibration_screen_progress(void)
+{
+  static uint8_t counter = 0;
+
+  switch (counter)
+  {
+    case 1:  ssd1306_printFixed(8, 24, "Calibrating.  ", STYLE_NORMAL); break;
+    case 2:  ssd1306_printFixed(8, 24, "Calibrating.. ", STYLE_NORMAL); break;
+    case 3:  ssd1306_printFixed(8, 24, "Calibrating...", STYLE_NORMAL); break;
+    default: ssd1306_printFixed(8, 24, "Calibrating   ", STYLE_NORMAL); break;
+  }
+
+  counter++;
+  if (counter > 3)
+  {
+    counter = 0;
+  }
+}
+
 static void show_calibration_screen(void)
 {
   static bool waiting_to_disable = false;
@@ -717,8 +639,7 @@ static void show_calibration_screen(void)
   {
     if (waiting_to_disable == false)
     {
-      ssd1306_printFixed(8,  24, "Calibrating...", STYLE_NORMAL);
-      do_calibration();  
+      do_calibration(calibration_screen_progress);
       si5351.set_clock_pwr(SI5351_CLK0, 1);
       waiting_to_disable = true;
     }
@@ -836,7 +757,7 @@ void loop()
   {
     if (cal_factor_valid == false)
     {
-      do_calibration();
+      do_calibration(NULL);
     }
   }
 

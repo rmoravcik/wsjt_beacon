@@ -1,0 +1,110 @@
+#ifndef _PRIV_TYPES_H_
+#define _PRIV_TYPES_H_
+
+enum screen {
+  SCREEN_STATUS = 0,
+  SCREEN_SET_MODE,
+  SCREEN_SET_FREQUENCY,
+  SCREEN_GPS_STATUS,
+  SCREEN_CALIBRATION,
+  SCREEN_VERSION,
+  SCREEN_COUNT
+};
+
+enum mode {
+  MODE_JT9 = 0,
+  MODE_JT65,
+/*  
+  MODE_JT4,
+*/
+  MODE_WSPR,
+/*
+  MODE_FSQ_2,
+  MODE_FSQ_3,
+  MODE_FSQ_4_5,
+  MODE_FSQ_6,
+*/
+  MODE_FT8,
+  MODE_COUNT
+};
+
+enum band {
+  BAND_160M = 0,
+  BAND_80M,
+  BAND_40M,
+  BAND_30M,
+  BAND_20M,
+  BAND_17M,
+  BAND_15M,
+  BAND_12M,
+  BAND_10M,
+  BAND_6M,
+  BAND_2M,
+  BAND_COUNT
+};
+
+struct mode_param {
+  const char mode_name[5];
+  uint16_t symbol_count;
+  uint16_t tone_spacing;
+  uint16_t tone_delay;
+  const uint32_t *freqs;
+};
+
+const uint32_t jt9_freqs[BAND_COUNT] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+  144489000UL
+};
+
+const uint32_t jt65_freqs[BAND_COUNT] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+  144489000UL
+};
+
+const uint32_t wspr_freqs[BAND_COUNT] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+  144489000UL
+};
+
+const uint32_t ft8_freqs[BAND_COUNT] = {
+    1836600UL,
+    3568600UL,
+    7038600UL,
+   10138700UL,
+   14095600UL,
+   18104600UL,
+   21094600UL,
+   24924600UL,
+   28124600UL,
+   50293000UL,
+  144489000UL
+};
+
+#endif /* _PRIV_TYPES_H_ */
