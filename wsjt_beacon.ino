@@ -58,6 +58,8 @@ TinyGPS gps;
 Encoder encoder(ENC_A_PIN, ENC_B_PIN);
 Button encoder_button(ENC_BUTTON_PIN);
 
+char loc[5] = "AA00";
+
 uint8_t sel_freq = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
 
@@ -77,6 +79,39 @@ static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
 
 typedef void (*cal_refresh_cb)(void);
+
+// Overtaken from https://github.com/W3PM/GPS-Display-and-Time-Grid-Square-Synchronization-Source/blob/master/GPS_display_source_v2_4a.ino
+void calc_grid_square(float lat, float lon)
+{
+  int o1, o2, o3;
+  int a1, a2, a3;
+  double remainder;
+
+  // longitude
+  remainder = lon + 180.0;
+  o1 = (int)(remainder / 20.0);
+  remainder = remainder - (double)o1 * 20.0;
+  o2 = (int)(remainder / 2.0);
+//  remainder = remainder - 2.0 * (double)o2;
+//  o3 = (int)(12.0 * remainder);
+
+  // latitude
+  remainder = lat + 90.0;
+  a1 = (int)(remainder / 10.0);
+  remainder = remainder - (double)a1 * 10.0;
+  a2 = (int)(remainder);
+//  remainder = remainder - (double)a2;
+//  a3 = (int)(24.0 * remainder);
+
+  loc[0] = (char)o1 + 'A';
+  loc[1] = (char)a1 + 'A';
+  loc[2] = (char)o2 + '0';
+  loc[3] = (char)a2 + '0';
+  loc[4] = (char)0;
+//  loc[4] = (char)o3 + 'A';
+//  loc[5] = (char)a3 + 'A';
+//  loc[6] = (char)0;
+}
 
 static void read_config(void)
 {
@@ -138,6 +173,12 @@ static void encode(uint8_t *tx_buffer)
 
 static void set_tx_buffer(uint8_t *tx_buffer)
 {
+  char message[14];
+
+  DEBUGLN("Setting TX buffer...");
+
+  sprintf(message, "%s %s", call, loc);
+
   // Clear out the transmit buffer
   memset(tx_buffer, 0, 255);
 
@@ -184,6 +225,7 @@ static void process_sync_message()
 
     gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, &age);
 
+    // FIXME: Is this value ok???
     if (age < 500)
     {
       // Set the Time to the latest GPS reading
@@ -473,12 +515,12 @@ static void show_status_screen(void)
     ssd1306_setFixedFont(ssd1306xled_font6x8);
     ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
     ssd1306_printFixed( 52, 56, mode_params[cur_mode].mode_name, STYLE_NORMAL);
-    ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
     display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
   }
 
   ssd1306_setFixedFont(ssd1306xled_font6x8);
 
+  ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
   sprintf(buf, "%02d:%02d", hour(), minute());
   ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
@@ -732,9 +774,6 @@ void setup()
   // Disable the clock initially
   si5351.set_clock_pwr(SI5351_CLK2, 0);
 
-  DEBUGLN("Setting TX buffer...");
-  set_tx_buffer(tx_buffer);
-
   DEBUGLN("Encoder setup...");
   encoder_button.begin();
 
@@ -743,7 +782,7 @@ void setup()
 
   DEBUGLN("Done...");
 }
- 
+
 void loop()
 {
   static uint32_t last_update = 0;
@@ -755,12 +794,21 @@ void loop()
   
   if (timeStatus() == timeSet)
   {
+    float lat, lon;
+
+    gps.f_get_position(&lat, &lon);
+    calc_grid_square(lat, lon);
+
+    set_tx_buffer(tx_buffer);
+
     if (cal_factor_valid == false)
     {
+      // FIXME: Added status screen notification
       do_calibration(NULL);
     }
   }
 
+  // FIXME
   // Trigger every 10th minute
   // WSPR should start on the 1st second of the minute, but there's a slight delay
   // in this code because it is limited to 1 second resolution.
