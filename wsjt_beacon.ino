@@ -301,14 +301,19 @@ static void pps_interrupt()
   if (cal_timeout == 0)
   {
     TCA0.SINGLE.CTRLA = 0;
-    TCA0.SINGLE.CNT = 0;
+    TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
     TCA0.SINGLE.EVCTRL = TCA_SINGLE_EVACT_POSEDGE_gc | TCA_SINGLE_CNTEI_bm;
+    TCA0.SINGLE.INTCTRL = TCA_SINGLE_OVF_bm;
+    TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm;
     timer0_ovf_counter = 0;
   }
   else if (cal_timeout == CAL_TIME_SECONDS)
   {
     timer0_count = TCA0.SINGLE.CNT;
+    TCA0.SINGLE.CTRLA = 0;
+    TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
     TCA0.SINGLE.EVCTRL = 0;
+    TCA0.SINGLE.INTCTRL = 0;
     TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV64_gc | TCA_SINGLE_ENABLE_bm;
   }
   cal_timeout++;
@@ -317,50 +322,14 @@ static void pps_interrupt()
 ISR(TCA0_OVF_vect)
 {
   timer0_ovf_counter++;
-// REMOVE ME
-#if 1
-  digitalWrite(12, !digitalRead(12));
-#endif
   TCA0.SINGLE.INTFLAGS = TCA_SINGLE_OVF_bm;
 }
 
-static void init_tca0(void)
+static void init_evsys(void)
 {
   EVSYS.CHANNEL4 = EVSYS_GENERATOR_PORT1_PIN4_gc;
   EVSYS.USERTCA0 = EVSYS_CHANNEL_CHANNEL4_gc;
 
-  TCA0.SINGLE.CTRLB = 0;
-  TCA0.SINGLE.CTRLC = 0;
-  TCA0.SINGLE.CTRLD = 0;
-  TCA0.SINGLE.PER = 0xFFFF;
-  TCA0.SINGLE.CMP0BUF = 0;
-  TCA0.SINGLE.CMP1BUF = 0;
-  TCA0.SINGLE.CMP2BUF = 0;
-  TCA0.SINGLE.INTCTRL = TCA_SINGLE_OVF_bm;
-
-// REMOVE ME
-#if 1
-  pinMode(12, OUTPUT);
-  Serial.print("EVSYS.CHANNEL0="); Serial.println(EVSYS.CHANNEL0, HEX);
-  Serial.print("EVSYS.CHANNEL1="); Serial.println(EVSYS.CHANNEL1, HEX);
-  Serial.print("EVSYS.CHANNEL2="); Serial.println(EVSYS.CHANNEL2, HEX);
-  Serial.print("EVSYS.CHANNEL3="); Serial.println(EVSYS.CHANNEL3, HEX);
-  Serial.print("EVSYS.CHANNEL4="); Serial.println(EVSYS.CHANNEL4, HEX);
-  Serial.print("EVSYS.CHANNEL5="); Serial.println(EVSYS.CHANNEL5, HEX);
-  Serial.print("EVSYS.CHANNEL6="); Serial.println(EVSYS.CHANNEL6, HEX);
-  Serial.print("EVSYS.CHANNEL7="); Serial.println(EVSYS.CHANNEL7, HEX);
-  Serial.print("TCA0.SINGLE.CTRLA="); Serial.println(TCA0.SINGLE.CTRLA, HEX);
-  Serial.print("TCA0.SINGLE.CTRLB="); Serial.println(TCA0.SINGLE.CTRLB, HEX);
-  Serial.print("TCA0.SINGLE.CTRLC="); Serial.println(TCA0.SINGLE.CTRLC, HEX);
-  Serial.print("TCA0.SINGLE.CTRLD="); Serial.println(TCA0.SINGLE.CTRLD, HEX);
-  Serial.print("TCA0.SINGLE.CTRLECLR="); Serial.println(TCA0.SINGLE.CTRLECLR, HEX);
-  Serial.print("TCA0.SINGLE.CTRLESET="); Serial.println(TCA0.SINGLE.CTRLESET, HEX);
-  Serial.print("TCA0.SINGLE.CTRLFCLR="); Serial.println(TCA0.SINGLE.CTRLFCLR, HEX);
-  Serial.print("TCA0.SINGLE.CTRLFSET="); Serial.println(TCA0.SINGLE.CTRLFSET, HEX);
-  Serial.print("TCA0.SINGLE.EVCTRL="); Serial.println(TCA0.SINGLE.EVCTRL, HEX);
-  Serial.print("TCA0.SINGLE.INTCTRL="); Serial.println(TCA0.SINGLE.INTCTRL, HEX);
-  Serial.print("TCA0.SINGLE.CNT="); Serial.println(TCA0.SINGLE.CNT, HEX);
-#endif
 }
 
 static void do_calibration(void)
@@ -372,8 +341,10 @@ static void do_calibration(void)
 // REMOVE ME
 #if 1
   TCA0.SINGLE.CTRLA = 0;
-  TCA0.SINGLE.CNT = 0;
+  TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
   TCA0.SINGLE.EVCTRL = TCA_SINGLE_EVACT_POSEDGE_gc | TCA_SINGLE_CNTEI_bm;
+  TCA0.SINGLE.INTCTRL = TCA_SINGLE_OVF_bm;
+  TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm;
 #endif
 
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
@@ -550,10 +521,19 @@ static int8_t get_new_value(void)
   return 0;
 }
 
-static void draw_gps_symbol(void)
+static void draw_gps_symbol(bool fix)
 {
-  uint8_t gps[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
-  ssd1306_drawBuffer(0, 0, 8, 8, gps);
+  uint8_t gps_no_signal[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xA4, 0xC1, 0x81 };
+  uint8_t gps_fix[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
+
+  if (fix == true)
+  {
+    ssd1306_drawBuffer(0, 0, 8, 8, gps_fix);
+  }
+  else
+  {
+    ssd1306_drawBuffer(0, 0, 8, 8, gps_no_signal);
+  }
 }
 
 static void draw_battery(const uint8_t capacity)
@@ -592,7 +572,6 @@ static void show_status_screen(void)
     ssd1306_printFixed( 52, 56, mode_params[cur_mode].mode_name, STYLE_NORMAL);
     ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
     display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
-    draw_gps_symbol();
   }
 
   ssd1306_setFixedFont(ssd1306xled_font6x8);
@@ -600,6 +579,7 @@ static void show_status_screen(void)
   sprintf(buf, "%02d:%02d", hour(), minute());
   ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
+  draw_gps_symbol(true);
   draw_battery(50);
 }
 
@@ -837,8 +817,8 @@ void setup()
   DEBUGLN("Encoder setup...");
   encoder_button.begin();
 
-  DEBUGLN("Initialize TIMER A...");
-  init_tca0();
+  DEBUGLN("Initialize EVSYS...");
+  init_evsys();
 
   DEBUGLN("Done...");
 }
