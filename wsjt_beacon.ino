@@ -28,6 +28,8 @@
 
 #define VERSION_STRING   "v0.9.0"
 
+const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
+
 const struct mode_param mode_params[MODE_COUNT] {
  { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
  { "JT65", JT65_SYMBOL_COUNT, 269, 371, jt65_freqs },
@@ -278,15 +280,6 @@ static void do_calibration(cal_refresh_cb cb)
 
   DEBUG("Calibration started");
 
-// REMOVE ME
-#if 1
-  TCA0.SINGLE.CTRLA = 0;
-  TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
-  TCA0.SINGLE.EVCTRL = TCA_SINGLE_EVACT_POSEDGE_gc | TCA_SINGLE_CNTEI_bm;
-  TCA0.SINGLE.INTCTRL = TCA_SINGLE_OVF_bm;
-  TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm;
-#endif
-
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
 
   si5351.set_clock_pwr(SI5351_CLK2, 1);
@@ -300,6 +293,7 @@ static void do_calibration(cal_refresh_cb cb)
         (*cb)();
       }
     }
+    prev_cal_timeout = cal_timeout;
   } while (cal_timeout < CAL_TIME_SECONDS);
   DEBUGLN("");
 
@@ -468,16 +462,23 @@ static int8_t get_new_value(void)
 
 static void draw_gps_symbol(bool fix)
 {
-  uint8_t gps_no_signal[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xA4, 0xC1, 0x81 };
-  uint8_t gps_fix[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
+  static bool toggle = false;
 
   if (fix == true)
   {
-    ssd1306_drawBuffer(0, 0, 8, 8, gps_fix);
+    ssd1306_drawBuffer(0, 0, 8, 8, gps_icon);
   }
   else
   {
-    ssd1306_drawBuffer(0, 0, 8, 8, gps_no_signal);
+    if (toggle)
+    {
+      ssd1306_drawBuffer(0, 0, 8, 8, gps_icon);
+    }
+    else
+    {
+      ssd1306_clearBlock(0, 0, 8, 8);
+    }
+    toggle = !toggle;
   }
 }
 
@@ -524,7 +525,7 @@ static void show_status_screen(void)
   sprintf(buf, "%02d:%02d", hour(), minute());
   ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
-  draw_gps_symbol(true);
+  draw_gps_symbol(false);
   draw_battery(50);
 }
 
@@ -744,7 +745,7 @@ void setup()
   Serial1.begin(9600);
 
   DEBUGLN("NEO-6M 1PPS IRQ setup...");
-  pinMode(GPS_PPS_PIN, INPUT_PULLUP);
+  pinMode(GPS_PPS_PIN, INPUT);
 
   DEBUGLN("SSD1306 setup...");
   ssd1306_128x64_i2c_init();
