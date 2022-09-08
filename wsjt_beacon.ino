@@ -72,8 +72,8 @@ bool refresh_screen = false;
 bool edit_mode = false;
 bool edit_mode_blink_toggle = false;
 
-#define CAL_FREQ 250000000UL
-#define CAL_TIME_SECONDS 20UL
+#define CAL_FREQ         (2500000ULL * SI5351_FREQ_MULT)
+#define CAL_TIME_SECONDS (20UL)
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
 volatile uint8_t cal_timeout = CAL_TIME_SECONDS;
@@ -162,7 +162,7 @@ static void encode(uint8_t *tx_buffer)
 
   for (i = 0; i < mode_params[cur_mode].symbol_count; i++)
   {
-      si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * 100) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
+      si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
       delay(mode_params[cur_mode].tone_delay);
   }
 
@@ -253,8 +253,8 @@ static void pps_interrupt()
     timer0_count = TCA0.SINGLE.CNT;
     TCA0.SINGLE.CTRLA = 0;
     TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
-    TCA0.SINGLE.EVCTRL = 0;
-    TCA0.SINGLE.INTCTRL = 0;
+    TCA0.SINGLE.CTRLB = TCA_SINGLE_WGMODE_SINGLESLOPE_gc;
+    TCA0.SINGLE.PER = PWM_TIMER_PERIOD;
     TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV64_gc | TCA_SINGLE_ENABLE_bm;
   }
   cal_timeout++;
@@ -299,7 +299,7 @@ static void do_calibration(cal_refresh_cb cb)
 
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
-  cal_factor = (CAL_FREQ - (((timer0_ovf_counter * 0x10000) + timer0_count) / CAL_TIME_SECONDS)) + cal_factor;
+  cal_factor = (CAL_FREQ - (((timer0_ovf_counter * 0x10000) + timer0_count) * (SI5351_FREQ_MULT / CAL_TIME_SECONDS))) + cal_factor;
   if ((cal_factor < 50000) && (cal_factor > -50000))
   {
     DEBUG("Calibration finished. factor=");
@@ -308,6 +308,10 @@ static void do_calibration(cal_refresh_cb cb)
   }
   else
   {
+    DEBUG("timer0_ovf_counter=");
+    DEBUG(timer0_ovf_counter);
+    DEBUG(" timer0_count=");
+    DEBUGLN(timer0_count);
     DEBUG("Calibration factor=");
     DEBUG(cal_factor);
     DEBUGLN(" invalid!");
@@ -761,7 +765,7 @@ void setup()
   si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, cal_factor);
 
   // Set CLK0 output
-  si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * 100, SI5351_CLK0);
+  si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
   // Set for max power
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
   // Disable the clock initially
