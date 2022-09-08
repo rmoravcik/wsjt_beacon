@@ -275,7 +275,7 @@ static void init_evsys(void)
 
 static void do_calibration(cal_refresh_cb cb)
 {
-  uint8_t prev_cal_timeout = CAL_TIME_SECONDS;
+  uint8_t prev_cal_timeout = 0;
   cal_timeout = 0;
 
   DEBUG("Calibration started");
@@ -287,34 +287,34 @@ static void do_calibration(cal_refresh_cb cb)
   do {
     if (prev_cal_timeout != cal_timeout)
     {
-      DEBUG(".");
+      DEBUGLN(".");
       if (cb != NULL)
       {
         (*cb)();
       }
     }
     prev_cal_timeout = cal_timeout;
-  } while (cal_timeout < CAL_TIME_SECONDS);
+  } while (cal_timeout < CAL_TIME_SECONDS + 1);
   DEBUGLN("");
 
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
-  cal_factor = (CAL_FREQ - (((timer0_ovf_counter * 0x10000) + timer0_count) * (SI5351_FREQ_MULT / CAL_TIME_SECONDS))) + cal_factor;
-  if ((cal_factor < 50000) && (cal_factor > -50000))
+  uint32_t measured_freq = ((timer0_ovf_counter * 0x10000) + timer0_count) * (SI5351_FREQ_MULT / CAL_TIME_SECONDS);
+  cal_factor = CAL_FREQ - measured_freq + cal_factor;
+
+  DEBUG("cal_freq=");
+  DEBUGLN(CAL_FREQ);
+  DEBUG("measured_freq=");
+  DEBUGLN(measured_freq);
+  DEBUG("cal_factor=");
+  DEBUGLN(cal_factor);
+
+  if ((cal_factor < 1000000) && (cal_factor > -1000000))
   {
-    DEBUG("Calibration finished. factor=");
-    DEBUGLN(cal_factor);
     cal_factor_valid = true;
   }
   else
   {
-    DEBUG("timer0_ovf_counter=");
-    DEBUG(timer0_ovf_counter);
-    DEBUG(" timer0_count=");
-    DEBUGLN(timer0_count);
-    DEBUG("Calibration factor=");
-    DEBUG(cal_factor);
-    DEBUGLN(" invalid!");
     cal_factor = 0;
   }
 
