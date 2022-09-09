@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v0.9.0"
+#define VERSION_STRING   "v0.9.1"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -55,6 +55,8 @@ const struct mode_param mode_params[MODE_COUNT] {
 #define ENC_A_PIN              2
 #define ENC_B_PIN              3
 #define ENC_BUTTON_PIN         4
+
+#define BATTERY_PIN           14
 
 // Global variables
 Si5351 si5351;
@@ -483,24 +485,25 @@ static void draw_gps_symbol(bool fix)
   }
 }
 
-static void draw_battery(const uint8_t capacity)
+static void draw_battery(void)
 {
+  int16_t raw = analogRead(BATTERY_PIN);
+
   ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
-  if (capacity > 75)
+  if (raw >= 930)
   {
     ssd1306_fillRect(111, 0, 124, 7);
   }
-  else if (capacity > 50)
+  else if (raw >= 906)
   {
     ssd1306_fillRect(111, 0, 121, 7);
   }
-  else if (capacity > 25)
+  else if (raw >= 860)
   {
     ssd1306_fillRect(111, 0, 117, 7);
-
   }
-  else if (capacity > 0)
+  else if (raw >= 815)
   {
     ssd1306_fillRect(111, 0, 113, 7);    
   }
@@ -526,7 +529,7 @@ static void show_status_screen(void)
   ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
   draw_gps_symbol(false);
-  draw_battery(50);
+  draw_battery();
 }
 
 static void show_set_mode_screen(void)
@@ -776,36 +779,25 @@ void setup()
 
   DEBUGLN("NEO-6M setup...");
   Serial1.begin(9600);
-
-  DEBUGLN("NEO-6M 1PPS IRQ setup...");
   pinMode(GPS_PPS_PIN, INPUT);
 
   DEBUGLN("SSD1306 setup...");
   ssd1306_128x64_i2c_init();
-
-  // Clear the buffer
-  DEBUGLN("Clear screen...");
   ssd1306_clearScreen();
 
   DEBUGLN("Si5351 setup...");
   pinMode(CAL_SIGNAL_PIN, INPUT);
-  // Initialize the Si5351
-  // Change the 2nd parameter in init if using a ref osc other than 25 MHz
   si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, cal_factor);
 
   // Set CLK0 output
   si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
-  // Set for max power
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
-  // Disable the clock initially
   si5351.set_clock_pwr(SI5351_CLK0, 0);
 
   // Set CLK2 output
   si5351.set_ms_source(SI5351_CLK2, SI5351_PLLB);
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
-  // Set for max power
   si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
-  // Disable the clock initially
   si5351.set_clock_pwr(SI5351_CLK2, 0);
 
   DEBUGLN("Encoder setup...");
@@ -813,6 +805,10 @@ void setup()
 
   DEBUGLN("Initialize EVSYS...");
   init_evsys();
+
+  DEBUGLN("ADC setup...");
+  analogReference(INTERNAL1V1);
+  pinMode(BATTERY_PIN, INPUT);
 
   DEBUGLN("Done...");
 }
