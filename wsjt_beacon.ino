@@ -493,20 +493,20 @@ static void draw_battery(const uint8_t capacity)
 
   if (capacity > 75)
   {
-    ssd1306_fillRect(111, 0, 124, 8);
+    ssd1306_fillRect(111, 0, 124, 7);
   }
   else if (capacity > 50)
   {
-    ssd1306_fillRect(111, 0, 121, 8);
+    ssd1306_fillRect(111, 0, 121, 7);
   }
   else if (capacity > 25)
   {
-    ssd1306_fillRect(111, 0, 117, 8);
+    ssd1306_fillRect(111, 0, 117, 7);
 
   }
   else if (capacity > 0)
   {
-    ssd1306_fillRect(111, 0, 113, 8);    
+    ssd1306_fillRect(111, 0, 113, 7);    
   }
 }
 
