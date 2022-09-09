@@ -73,7 +73,7 @@ bool refresh_screen = false;
 bool edit_mode = false;
 bool edit_mode_blink_toggle = false;
 
-#define CAL_FREQ         (2500000ULL * SI5351_FREQ_MULT)
+#define CAL_FREQ         (2500000ULL)
 #define CAL_TIME_SECONDS (40UL)
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
@@ -142,10 +142,6 @@ static void encode(uint8_t *tx_buffer)
 {
   uint8_t i;
 
-  ssd1306_setFixedFont(ssd1306xled_font6x8);
-  ssd1306_negativeMode();
-  ssd1306_printFixed(52, 8, " TX ", STYLE_NORMAL);
-
   // Reset the tone to the base frequency and turn on the output
   si5351.set_clock_pwr(SI5351_CLK0, 1);
     
@@ -169,9 +165,6 @@ static void encode(uint8_t *tx_buffer)
 
   // Turn off the output
   si5351.set_clock_pwr(SI5351_CLK0, 0);
-
-  ssd1306_positiveMode();
-  ssd1306_printFixed(52, 8, "    ", STYLE_NORMAL);
 }
 
 static void set_tx_buffer(uint8_t *tx_buffer)
@@ -300,13 +293,14 @@ static void do_calibration(cal_refresh_cb cb)
 
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
-  uint32_t measured_freq = ((timer0_ovf_counter * 0x10000) + timer0_count) * (SI5351_FREQ_MULT / CAL_TIME_SECONDS);
-  cal_factor = measured_freq - CAL_FREQ + cal_factor;
+  uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
+  int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
+  cal_factor -= pulse_diff / (CAL_TIME_SECONDS / 10);
 
-  DEBUG("cal_freq=");
-  DEBUGLN(CAL_FREQ);
   DEBUG("measured_freq=");
-  DEBUGLN(measured_freq);
+  DEBUGLN(pulse_count / CAL_TIME_SECONDS);
+  DEBUG("pulse_diff=");
+  DEBUGLN(pulse_diff);
   DEBUG("cal_factor=");
   DEBUGLN(cal_factor);
 
@@ -645,60 +639,20 @@ static void show_gps_status_screen(void)
 static void show_calibration_progress(void)
 {
   static uint8_t counter = 0;
-  uint8_t max_counter = 0;
 
-  if (cur_screen == SCREEN_STATUS)
-  {
-    ssd1306_setFixedFont(ssd1306xled_font6x8);
-    max_counter = 1;
-  }
-  else if (cur_screen == SCREEN_CALIBRATION)
-  {
-    ssd1306_setFixedFont(ssd1306xled_font8x16);
-    ssd1306_printFixed(8, 24, "Calibrating", STYLE_NORMAL);
-    max_counter = 3;
-  }
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+  ssd1306_printFixed(8, 24, "Calibrating", STYLE_NORMAL);
 
   switch (counter)
   {
-    case 1:
-      if (cur_screen == SCREEN_STATUS)
-      {
-        ssd1306_positiveMode();
-        ssd1306_printFixed(49, 8, "     ", STYLE_NORMAL);
-      }
-      else if (cur_screen == SCREEN_STATUS)
-      {
-        ssd1306_printFixed(96, 24, ".   ", STYLE_NORMAL);
-      }
-      break;
-    case 2:
-      if (cur_screen == SCREEN_CALIBRATION)
-      {
-        ssd1306_printFixed(96, 24, "..  ", STYLE_NORMAL);
-      }
-      break;
-    case 3:
-      if (cur_screen == SCREEN_CALIBRATION)
-      {
-        ssd1306_printFixed(96, 24, "... ", STYLE_NORMAL);
-      }
-      break;
-    default:
-      if (cur_screen == SCREEN_STATUS)
-      {
-        ssd1306_negativeMode();
-        ssd1306_printFixed(49, 8, " CAL ", STYLE_NORMAL);
-      }
-      else if (cur_screen == SCREEN_CALIBRATION)
-      {
-        ssd1306_printFixed(96, 24, "    ", STYLE_NORMAL);
-      }
-      break;
+    case 1:  ssd1306_printFixed(96, 24, ".   ", STYLE_NORMAL); break;
+    case 2:  ssd1306_printFixed(96, 24, "..  ", STYLE_NORMAL); break;
+    case 3:  ssd1306_printFixed(96, 24, "... ", STYLE_NORMAL); break;
+    default: ssd1306_printFixed(96, 24, "    ", STYLE_NORMAL); break;
   }
 
   counter++;
-  if (counter > max_counter)
+  if (counter > 3)
   {
     counter = 0;
   }
@@ -719,7 +673,7 @@ static void show_calibration_screen(void)
   if (edit_mode == false)
   {
     char buf[16];
-    sprintf(buf, "Factor:%8ld", cal_factor);
+    sprintf(buf, "Factor:%7ld", cal_factor);
     ssd1306_printFixed(8,  24, buf, STYLE_NORMAL);  
   }
   else
@@ -845,7 +799,7 @@ void setup()
 
   // Set CLK2 output
   si5351.set_ms_source(SI5351_CLK2, SI5351_PLLB);
-  si5351.set_freq(CAL_FREQ, SI5351_CLK2);
+  si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
   // Set for max power
   si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
   // Disable the clock initially
@@ -891,8 +845,14 @@ void loop()
   // if(timeSet && timeStatus() == timeSet && minute() % 2 == 0 && second() == 0)
   if (timeStatus() == timeSet && (minute() % 10 == 0 || minute() % 10 == 4) && second() == 0)
   {
+    ssd1306_negativeMode();
+    display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+
     encode(tx_buffer);
     delay(1000);
+
+    ssd1306_positiveMode();
+    display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
   }
 
   show_screen();
@@ -904,4 +864,4 @@ void loop()
   }
 
   delay(20);
-}
+} 
