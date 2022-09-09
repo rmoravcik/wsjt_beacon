@@ -29,6 +29,7 @@
 #define VERSION_STRING   "v0.9.0"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
+const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF, 0x3C, 0x3C };
 
 const struct mode_param mode_params[MODE_COUNT] {
  { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
@@ -488,8 +489,7 @@ static void draw_gps_symbol(bool fix)
 
 static void draw_battery(const uint8_t capacity)
 {
-  ssd1306_drawRect(110, 0, 125, 8);
-  ssd1306_drawRect(126, 2, 127, 6);
+  ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
   if (capacity > 75)
   {
