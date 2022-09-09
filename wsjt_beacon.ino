@@ -642,20 +642,63 @@ static void show_gps_status_screen(void)
   ssd1306_printFixed( 0, 56, buf, STYLE_NORMAL);
 }
 
-static void calibration_screen_progress(void)
+static void show_calibration_progress(void)
 {
   static uint8_t counter = 0;
+  uint8_t max_counter = 0;
+
+  if (cur_screen == SCREEN_STATUS)
+  {
+    ssd1306_setFixedFont(ssd1306xled_font6x8);
+    max_counter = 1;
+  }
+  else if (cur_screen == SCREEN_CALIBRATION)
+  {
+    ssd1306_setFixedFont(ssd1306xled_font8x16);
+    ssd1306_printFixed(8, 24, "Calibrating", STYLE_NORMAL);
+    max_counter = 3;
+  }
 
   switch (counter)
   {
-    case 1:  ssd1306_printFixed(8, 24, "Calibrating.   ", STYLE_NORMAL); break;
-    case 2:  ssd1306_printFixed(8, 24, "Calibrating..  ", STYLE_NORMAL); break;
-    case 3:  ssd1306_printFixed(8, 24, "Calibrating... ", STYLE_NORMAL); break;
-    default: ssd1306_printFixed(8, 24, "Calibrating    ", STYLE_NORMAL); break;
+    case 1:
+      if (cur_screen == SCREEN_STATUS)
+      {
+        ssd1306_positiveMode();
+        ssd1306_printFixed(49, 8, "     ", STYLE_NORMAL);
+      }
+      else if (cur_screen == SCREEN_STATUS)
+      {
+        ssd1306_printFixed(96, 24, ".   ", STYLE_NORMAL);
+      }
+      break;
+    case 2:
+      if (cur_screen == SCREEN_CALIBRATION)
+      {
+        ssd1306_printFixed(96, 24, "..  ", STYLE_NORMAL);
+      }
+      break;
+    case 3:
+      if (cur_screen == SCREEN_CALIBRATION)
+      {
+        ssd1306_printFixed(96, 24, "... ", STYLE_NORMAL);
+      }
+      break;
+    default:
+      if (cur_screen == SCREEN_STATUS)
+      {
+        ssd1306_negativeMode();
+        ssd1306_printFixed(49, 8, " CAL ", STYLE_NORMAL);
+      }
+      else if (cur_screen == SCREEN_CALIBRATION)
+      {
+        ssd1306_printFixed(96, 24, "    ", STYLE_NORMAL);
+      }
+      break;
   }
 
   counter++;
-  if (counter > 3)
+  if (counter > max_counter)
   {
     counter = 0;
   }
@@ -681,7 +724,7 @@ static void show_calibration_screen(void)
   }
   else
   {
-    do_calibration(calibration_screen_progress);
+    do_calibration(show_calibration_progress);
     edit_mode = false;
   }
 }
@@ -837,8 +880,7 @@ void loop()
 
     if (cal_factor_valid == false)
     {
-      // FIXME: Added status screen notification
-      do_calibration(NULL);
+      do_calibration(show_calibration_progress);
     }
   }
 
