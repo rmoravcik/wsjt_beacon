@@ -73,7 +73,7 @@ bool edit_mode = false;
 bool edit_mode_blink_toggle = false;
 
 #define CAL_FREQ         (2500000ULL * SI5351_FREQ_MULT)
-#define CAL_TIME_SECONDS (20UL)
+#define CAL_TIME_SECONDS (40UL)
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
 volatile uint8_t cal_timeout = CAL_TIME_SECONDS;
@@ -85,8 +85,8 @@ typedef void (*cal_refresh_cb)(void);
 // Overtaken from https://github.com/W3PM/GPS-Display-and-Time-Grid-Square-Synchronization-Source/blob/master/GPS_display_source_v2_4a.ino
 void calc_grid_square(float lat, float lon)
 {
-  int o1, o2, o3;
-  int a1, a2, a3;
+  int o1, o2; //, o3;
+  int a1, a2; //, a3;
   double remainder;
 
   // longitude
@@ -287,7 +287,7 @@ static void do_calibration(cal_refresh_cb cb)
   do {
     if (prev_cal_timeout != cal_timeout)
     {
-      DEBUGLN(".");
+      DEBUG(".");
       if (cb != NULL)
       {
         (*cb)();
@@ -300,7 +300,7 @@ static void do_calibration(cal_refresh_cb cb)
   detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
 
   uint32_t measured_freq = ((timer0_ovf_counter * 0x10000) + timer0_count) * (SI5351_FREQ_MULT / CAL_TIME_SECONDS);
-  cal_factor = CAL_FREQ - measured_freq + cal_factor;
+  cal_factor = measured_freq - CAL_FREQ + cal_factor;
 
   DEBUG("cal_freq=");
   DEBUGLN(CAL_FREQ);
@@ -648,10 +648,10 @@ static void calibration_screen_progress(void)
 
   switch (counter)
   {
-    case 1:  ssd1306_printFixed(8, 24, "Calibrating.  ", STYLE_NORMAL); break;
-    case 2:  ssd1306_printFixed(8, 24, "Calibrating.. ", STYLE_NORMAL); break;
-    case 3:  ssd1306_printFixed(8, 24, "Calibrating...", STYLE_NORMAL); break;
-    default: ssd1306_printFixed(8, 24, "Calibrating   ", STYLE_NORMAL); break;
+    case 1:  ssd1306_printFixed(8, 24, "Calibrating.   ", STYLE_NORMAL); break;
+    case 2:  ssd1306_printFixed(8, 24, "Calibrating..  ", STYLE_NORMAL); break;
+    case 3:  ssd1306_printFixed(8, 24, "Calibrating... ", STYLE_NORMAL); break;
+    default: ssd1306_printFixed(8, 24, "Calibrating    ", STYLE_NORMAL); break;
   }
 
   counter++;
@@ -663,8 +663,6 @@ static void calibration_screen_progress(void)
 
 static void show_calibration_screen(void)
 {
-  static bool waiting_to_disable = false;
-  
   get_new_value();
   
   if (refresh_screen == false)
@@ -677,20 +675,48 @@ static void show_calibration_screen(void)
 
   if (edit_mode == false)
   {
-    char buf[15];
-    sprintf(buf, "Factor:%7ld", cal_factor);
+    char buf[16];
+    sprintf(buf, "Factor:%8ld", cal_factor);
     ssd1306_printFixed(8,  24, buf, STYLE_NORMAL);  
-    si5351.set_clock_pwr(SI5351_CLK0, 0);
   }
   else
   {
-    if (waiting_to_disable == false)
+    do_calibration(calibration_screen_progress);
+    edit_mode = false;
+  }
+}
+
+static void show_transmitter_screen(void)
+{
+  static bool enabled;
+  get_new_value();
+
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    display_header("Transmitter");
+    enabled = true;
+  }
+
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+
+  if (edit_mode == false)
+  {
+    if (enabled == true)
     {
-      do_calibration(calibration_screen_progress);
-      si5351.set_clock_pwr(SI5351_CLK0, 1);
-      waiting_to_disable = true;
+      ssd1306_printFixed(40,  24, "Enable ", STYLE_NORMAL);
+      si5351.set_clock_pwr(SI5351_CLK0, 0);
+      enabled = false;
     }
-    ssd1306_printFixed(8,  24, "  Disable TX  ", STYLE_NORMAL);
+  }
+  else
+  {
+    if (enabled == false)
+    {
+      ssd1306_printFixed(40,  24, "Disable", STYLE_NORMAL);
+      si5351.set_clock_pwr(SI5351_CLK0, 1);
+      enabled = true;
+    }
   }
 }
 
@@ -724,6 +750,9 @@ static void show_screen(void)
         break;
       case SCREEN_CALIBRATION:
         show_calibration_screen();
+        break;
+      case SCREEN_TRANSMITTER:
+        show_transmitter_screen();
         break;
       case SCREEN_VERSION:
         show_version_screen();
