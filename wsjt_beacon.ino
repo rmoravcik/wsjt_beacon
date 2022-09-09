@@ -80,7 +80,7 @@ bool edit_mode_blink_toggle = false;
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
 volatile uint8_t cal_timeout = CAL_TIME_SECONDS;
-static int32_t cal_factor = 300000;
+static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
 
 typedef void (*cal_refresh_cb)(void);
@@ -297,12 +297,10 @@ static void do_calibration(cal_refresh_cb cb)
 
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
-  cal_factor += pulse_diff / (CAL_TIME_SECONDS / 10);
+  cal_factor += pulse_diff;
 
   DEBUG("measured_freq=");
   DEBUGLN(pulse_count / CAL_TIME_SECONDS);
-  DEBUG("pulse_diff=");
-  DEBUGLN(pulse_diff);
   DEBUG("cal_factor=");
   DEBUGLN(cal_factor);
 
