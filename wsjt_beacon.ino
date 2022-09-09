@@ -29,7 +29,9 @@
 #define VERSION_STRING   "v0.9.0"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
-const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF, 0x3C, 0x3C };
+const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
+                                   0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF, 0x3C,
+                                   0x3C };
 
 const struct mode_param mode_params[MODE_COUNT] {
  { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
@@ -78,7 +80,7 @@ bool edit_mode_blink_toggle = false;
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
 volatile uint8_t cal_timeout = CAL_TIME_SECONDS;
-static int32_t cal_factor = 0;
+static int32_t cal_factor = 300000;
 static bool cal_factor_valid = false;
 
 typedef void (*cal_refresh_cb)(void);
@@ -295,7 +297,7 @@ static void do_calibration(cal_refresh_cb cb)
 
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
-  cal_factor -= pulse_diff / (CAL_TIME_SECONDS / 10);
+  cal_factor += pulse_diff / (CAL_TIME_SECONDS / 10);
 
   DEBUG("measured_freq=");
   DEBUGLN(pulse_count / CAL_TIME_SECONDS);
@@ -314,7 +316,7 @@ static void do_calibration(cal_refresh_cb cb)
   }
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
-
+  si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
   si5351.set_clock_pwr(SI5351_CLK2, 0);
 }
 
@@ -343,6 +345,7 @@ static void display_mode(const char *text)
 
   ssd1306_setFixedFont(ssd1306xled_font8x16);
   ssd1306_printFixed(48, 24, text, STYLE_NORMAL);
+  ssd1306_positiveMode();
 }
 
 static void display_frequency(const uint32_t value, const char *unit)
@@ -369,6 +372,7 @@ static void display_frequency(const uint32_t value, const char *unit)
 
   ssd1306_setFixedFont(ssd1306xled_font8x16);
   ssd1306_printFixed(16,  24, text, STYLE_NORMAL);
+  ssd1306_positiveMode();
 }
 
 static uint8_t get_next_screen(void)
@@ -712,6 +716,7 @@ static void show_transmitter_screen(void)
     {
       ssd1306_printFixed(40,  24, "Disable", STYLE_NORMAL);
       si5351.set_clock_pwr(SI5351_CLK0, 1);
+      si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
       enabled = true;
     }
   }
