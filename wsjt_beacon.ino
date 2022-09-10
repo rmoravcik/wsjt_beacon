@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v1.0.3"
+#define VERSION_STRING   "v1.0.4"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -275,7 +275,7 @@ static void init_evsys(void)
 
 }
 
-static void do_calibration(cal_refresh_cb cb)
+static void calibration(cal_refresh_cb cb)
 {
   uint8_t prev_cal_timeout = 0;
   cal_timeout = 0;
@@ -706,7 +706,7 @@ static void show_calibration_screen(void)
   }
   else
   {
-    do_calibration(show_calibration_progress);
+    calibration(show_calibration_progress);
     edit_mode = false;
   }
 }
@@ -862,7 +862,7 @@ void loop()
 
           if (cal_factor_valid == false)
           {
-            do_calibration(show_calibration_progress);
+            calibration(show_calibration_progress);
           }
         }
         break;
@@ -880,21 +880,41 @@ void loop()
     last_time_status = time_status;
   }
 
-  // FIXME
-  // Trigger every 10th minute
-  // WSPR should start on the 1st second of the minute, but there's a slight delay
-  // in this code because it is limited to 1 second resolution.
-  // if(timeSet && timeStatus() == timeSet && minute() % 2 == 0 && second() == 0)
-  if (timeStatus() == timeSet && (minute() % 10 == 0 || minute() % 10 == 4) && second() == 0)
+  if (time_status == timeSet)
   {
-    ssd1306_negativeMode();
-    display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+    switch (minute())
+    {
+      case  0:
+      case 10:
+      case 20:
+      case 30:
+      case 40:
+      case 50:
+        {
+          if (second() == 1)
+          {
+            ssd1306_negativeMode();
+            display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 
-    encode(tx_buffer, draw_clock);
-    delay(1000);
+            encode(tx_buffer, draw_clock);
+            delay(1000);
 
-    ssd1306_positiveMode();
-    display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+            ssd1306_positiveMode();
+            display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+          }
+        }
+        break;
+
+      case 15:
+      case 45:
+        {
+          calibration(show_calibration_progress);
+        }
+        break;
+
+      default:
+        break;
+    }
   }
 
   show_screen();
