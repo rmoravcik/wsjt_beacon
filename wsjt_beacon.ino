@@ -26,12 +26,13 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v1.0.4"
+#define VERSION_STRING   "v1.0.5"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
                                    0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF, 0x3C,
                                    0x3C };
+const uint8_t battery_indicator[2] = { 0xBD, 0xBD };
 
 const struct mode_param mode_params[MODE_COUNT] {
  { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
@@ -498,24 +499,24 @@ static void draw_battery(void)
 
   ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
-  DEBUG("raw=");
-  DEBUGLN(raw);
+  if (raw >= 815)
+  {
+    ssd1306_drawBuffer(112, 0, 2, 8, battery_indicator);
+  }
+
+  if (raw >= 860)
+  {
+    ssd1306_drawBuffer(115, 0, 2, 8, battery_indicator);
+  }
+
+  if (raw >= 906)
+  {
+    ssd1306_drawBuffer(118, 0, 2, 8, battery_indicator);
+  }
 
   if (raw >= 930)
   {
-    ssd1306_fillRect(111, 0, 124, 7);
-  }
-  else if (raw >= 906)
-  {
-    ssd1306_fillRect(111, 0, 121, 7);
-  }
-  else if (raw >= 860)
-  {
-    ssd1306_fillRect(111, 0, 117, 7);
-  }
-  else if (raw >= 815)
-  {
-    ssd1306_fillRect(111, 0, 113, 7);    
+    ssd1306_drawBuffer(121, 0, 2, 8, battery_indicator);
   }
 }
 
