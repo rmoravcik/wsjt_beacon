@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v1.0.1"
+#define VERSION_STRING   "v1.0.2"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -515,10 +515,25 @@ static void draw_battery(void)
   }
 }
 
+static void draw_clock(void)
+{
+  static int last_minute = -1;
+  int cur_minute = minute();
+
+  if (cur_minute != last_minute)
+  {
+    char buf[6];
+
+    ssd1306_setFixedFont(ssd1306xled_font6x8);
+    sprintf(buf, "%02d:%02d", hour(), cur_minute);
+    ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
+
+    last_minute = cur_minute;
+  }
+}
+
 static void show_status_screen(void)
 {
-  char buf[6];
-
   if (refresh_screen == false)
   {
     ssd1306_clearScreen();
@@ -529,11 +544,9 @@ static void show_status_screen(void)
   }
 
   ssd1306_setFixedFont(ssd1306xled_font6x8);
-
   ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
-  sprintf(buf, "%02d:%02d", hour(), minute());
-  ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
+  draw_clock();
   draw_gps_symbol();
   draw_battery();
 }
@@ -822,25 +835,45 @@ void setup()
 void loop()
 {
   static uint32_t last_update = 0;
+  static timeStatus_t last_time_status = timeNotSet;
+  timeStatus_t time_status = timeStatus();
 
   if (Serial1.available())
   {
     process_sync_message();
   }
-  
-  if (timeStatus() == timeSet)
+
+  if (time_status != last_time_status)
   {
-    float lat, lon;
-
-    gps.f_get_position(&lat, &lon);
-    calc_grid_square(lat, lon);
-
-    set_tx_buffer(tx_buffer);
-
-    if (cal_factor_valid == false)
+    switch (time_status)
     {
-      do_calibration(show_calibration_progress);
+      case timeSet:
+        {
+          float lat, lon;
+
+          gps.f_get_position(&lat, &lon);
+          calc_grid_square(lat, lon);
+
+          set_tx_buffer(tx_buffer);
+
+          if (cal_factor_valid == false)
+          {
+            do_calibration(show_calibration_progress);
+          }
+        }
+        break;
+
+      case timeNeedsSync:
+        {
+          cal_factor_valid = false;
+        }
+        break;
+
+      default:
+        break;
     }
+
+    last_time_status = time_status;
   }
 
   // FIXME
