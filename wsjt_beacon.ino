@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v1.0.0"
+#define VERSION_STRING   "v1.0.1"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -226,7 +226,6 @@ static void process_sync_message()
 
     gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, &age);
 
-    // FIXME: Is this value ok???
     if (age < 500)
     {
       // Set the Time to the latest GPS reading
@@ -464,11 +463,14 @@ static int8_t get_new_value(void)
   return 0;
 }
 
-static void draw_gps_symbol(bool fix)
+static void draw_gps_symbol(void)
 {
   static bool toggle = false;
+  unsigned long age = TinyGPS::GPS_INVALID_FIX_TIME;
 
-  if (fix == true)
+  gps.get_position(NULL, NULL, &age);
+
+  if (age < 5000)
   {
     ssd1306_drawBuffer(0, 0, 8, 8, gps_icon);
   }
@@ -532,7 +534,7 @@ static void show_status_screen(void)
   sprintf(buf, "%02d:%02d", hour(), minute());
   ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
 
-  draw_gps_symbol(false);
+  draw_gps_symbol();
   draw_battery();
 }
 
