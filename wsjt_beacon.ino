@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v1.0.2"
+#define VERSION_STRING   "v1.0.3"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -143,7 +143,7 @@ static void write_config(void)
 }
 
 // Loop through the string, transmitting one character at a time.
-static void encode(uint8_t *tx_buffer)
+static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
 {
   uint8_t i;
 
@@ -165,6 +165,10 @@ static void encode(uint8_t *tx_buffer)
   for (i = 0; i < mode_params[cur_mode].symbol_count; i++)
   {
       si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
+      if (cb != NULL)
+      {
+        cb();
+      }
       delay(mode_params[cur_mode].tone_delay);
   }
 
@@ -886,7 +890,7 @@ void loop()
     ssd1306_negativeMode();
     display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 
-    encode(tx_buffer);
+    encode(tx_buffer, draw_clock);
     delay(1000);
 
     ssd1306_positiveMode();
