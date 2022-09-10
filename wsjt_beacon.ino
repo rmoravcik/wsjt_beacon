@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v0.9.1"
+#define VERSION_STRING   "v1.0.0"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -70,6 +70,7 @@ char loc[5] = "AA00";
 uint8_t sel_freq = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
 
+#define DISPLAY_REFRESH_TIME (1000)
 static uint8_t tx_buffer[255];
 uint8_t cur_screen = SCREEN_COUNT;
 bool refresh_screen = false;
@@ -491,6 +492,9 @@ static void draw_battery(void)
 
   ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
+  DEBUG("raw=");
+  DEBUGLN(raw);
+
   if (raw >= 930)
   {
     ssd1306_fillRect(111, 0, 124, 7);
@@ -856,11 +860,9 @@ void loop()
 
   show_screen();
 
-  if ((millis() - last_update) > 1000)
+  if ((millis() - last_update) > DISPLAY_REFRESH_TIME)
   {
     refresh_screen = true;
     last_update = millis();
   }
-
-  delay(20);
 } 
