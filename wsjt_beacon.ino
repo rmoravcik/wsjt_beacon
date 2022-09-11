@@ -198,7 +198,6 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   {
     si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
 
-    digitalWrite(13, 0);
     // Wait for timer expire
     TCA0.SINGLE.CNT = 0;
     tx_timeout = 10;
@@ -208,7 +207,6 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
       cb();
     }
     while (tx_timeout > 0) {};
-    digitalWrite(13, 1);
   }
 
   // Turn off the output
@@ -932,8 +930,6 @@ void setup()
   pinMode(BATTERY_PIN, INPUT);
 
   DEBUGLN("Done...");
-
-  pinMode(13, OUTPUT);
 }
 
 void loop()
