@@ -141,7 +141,7 @@ static void read_config(void)
 
   cal_factor  = (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR)     << 24;
   cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 1) << 16;
-  cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 2) << 8;
+  cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 2) <<  8;
   cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 3);
   if (cal_factor == -1)
   {
@@ -156,7 +156,7 @@ static void write_config(void)
   EEPROM.write(EEPROM_CAL_FACTOR,     (cal_factor >> 24) & 0xFF);
   EEPROM.write(EEPROM_CAL_FACTOR + 1, (cal_factor >> 16) & 0xFF);
   EEPROM.write(EEPROM_CAL_FACTOR + 2, (cal_factor >>  8) & 0xFF);
-  EEPROM.write(EEPROM_CAL_FACTOR + 3, cal_factor & 0xFF);
+  EEPROM.write(EEPROM_CAL_FACTOR + 3, (cal_factor)       & 0xFF);
 }
 
 ISR(TCA0_CMP0_vect)
