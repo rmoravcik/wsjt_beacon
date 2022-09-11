@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v1.0.6"
+#define VERSION_STRING   "v1.0.7"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -159,6 +159,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
 
   // Reset the tone to the base frequency and turn on the output
   si5351.set_clock_pwr(SI5351_CLK0, 1);
+  si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
   tx_active = true;
     
 /*
@@ -334,7 +335,7 @@ static void calibration(cal_refresh_cb cb)
 
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
-  cal_factor += pulse_diff;
+  cal_factor = pulse_diff;
 
   DEBUG("measured_freq=");
   DEBUGLN(pulse_count / CAL_TIME_SECONDS);
@@ -933,7 +934,7 @@ void loop()
     last_time_status = time_status;
   }
 
-  if ((time_status == timeSet) || (time_status == timeNotSet))
+  if (time_status == timeSet)
   {
     switch (minute())
     {
