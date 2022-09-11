@@ -127,8 +127,6 @@ void calc_grid_square(float lat, float lon)
 
 static void read_config(void)
 {
-  uint8_t factor[4];
-
   cur_mode = EEPROM.read(EEPROM_MODE);
   if (cur_mode > MODE_COUNT)
   {
@@ -141,13 +139,10 @@ static void read_config(void)
     sel_freq = BAND_20M;
   } 
 
-  factor[3] = EEPROM.read(EEPROM_CAL_FACTOR);
-  factor[2] = EEPROM.read(EEPROM_CAL_FACTOR + 1);
-  factor[1] = EEPROM.read(EEPROM_CAL_FACTOR + 2);
-  factor[0] = EEPROM.read(EEPROM_CAL_FACTOR + 3);
-
-  cal_factor = (uint32_t)factor[3] << 24 | (uint32_t)factor[2] << 16 | (uint32_t)factor[1] << 8 | (uint32_t)factor[0];
-
+  cal_factor  = (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR)     << 24;
+  cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 1) << 16;
+  cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 2) << 8;
+  cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 3);
   if (cal_factor == -1)
   {
     cal_factor = 0;
