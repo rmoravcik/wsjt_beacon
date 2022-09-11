@@ -80,7 +80,7 @@ bool refresh_screen = false;
 bool edit_mode = false;
 bool blink_toggle = false;
 bool tx_active = false;
-volatile uint8_t tx_timeout = 0;
+volatile int8_t tx_timeout = 0;
 
 #define CAL_FREQ         (2500000ULL)
 #define CAL_TIME_SECONDS (40UL)
@@ -176,6 +176,10 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
   tx_active = true;
     
+  DEBUGLN("Transmitting TX buffer...");
+
+  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+
 /*
   // Now transmit the channel symbols
   if ((cur_mode == MODE_FSQ_2) || (cur_mode == MODE_FSQ_3) || (cur_mode == MODE_FSQ_4_5) || (cur_mode == MODE_FSQ_6))
@@ -188,25 +192,30 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   }
 */
 
+  TCA0.SINGLE.CMP0 = mode_params[cur_mode].tone_delay * 25;
+
   for (i = 0; i < mode_params[cur_mode].symbol_count; i++)
   {
-      si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
+    si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
 
-      // Wait for timer expire
-      TCA0.SINGLE.CMP0 = mode_params[cur_mode].tone_delay * 25;
-      TCA0.SINGLE.CNT = 0;
-      tx_timeout = 10;
+    digitalWrite(13, 0);
+    // Wait for timer expire
+    TCA0.SINGLE.CNT = 0;
+    tx_timeout = 10;
 
-      if (cb != NULL)
-      {
-        cb();
-      }
-      while (tx_timeout > 0) {};
+    if (cb != NULL)
+    {
+      cb();
+    }
+    while (tx_timeout > 0) {};
+    digitalWrite(13, 1);
   }
 
   // Turn off the output
   si5351.set_clock_pwr(SI5351_CLK0, 0);
   tx_active = false;
+
+  DEBUGLN("Transmition finished...");
 }
 
 static void set_tx_buffer(uint8_t *tx_buffer)
@@ -318,7 +327,6 @@ static void init_evsys(void)
 {
   EVSYS.CHANNEL4 = EVSYS_GENERATOR_PORT1_PIN4_gc;
   EVSYS.USERTCA0 = EVSYS_CHANNEL_CHANNEL4_gc;
-
 }
 
 static void calibration(cal_refresh_cb cb)
@@ -577,11 +585,32 @@ static void draw_battery(void)
 
 static void draw_clock(void)
 {
-  char buf[6];
+  static uint8_t last_minute = 0xFF;
+  uint8_t cur_minute = minute();
+  bool draw = false;
 
-  ssd1306_setFixedFont(ssd1306xled_font6x8);
-  sprintf(buf, "%02d:%02d", hour(), minute());
-  ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
+  if (refresh_screen == false)
+  {
+    draw = true;
+  }
+  else
+  {
+
+    if (last_minute != cur_minute)
+    {
+      draw = true;
+      last_minute = cur_minute;
+    }
+  }
+
+  if (draw)
+  {
+    char buf[6];
+
+    ssd1306_setFixedFont(ssd1306xled_font6x8);
+    sprintf(buf, "%02d:%02d", hour(), cur_minute);
+    ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
+  }
 }
 
 static void draw_enable_status(const bool enabled)
@@ -600,8 +629,8 @@ static void draw_enable_status(const bool enabled)
 
 static void show_transmit_status(void)
 {
+  refresh_screen = true;
   draw_clock();
-  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 }
 
 static void show_status_screen(void)
@@ -878,7 +907,7 @@ void setup()
 
   DEBUGLN("Si5351 setup...");
   pinMode(CAL_SIGNAL_PIN, INPUT);
-  si5351.init(SI5351_CRYSTAL_LOAD_0PF, 0, cal_factor);
+  si5351.init(SI5351_CRYSTAL_LOAD_10PF, SI5351_XTAL_FREQ, cal_factor);
 
   // Set CLK0 output
   si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
@@ -903,6 +932,8 @@ void setup()
   pinMode(BATTERY_PIN, INPUT);
 
   DEBUGLN("Done...");
+
+  pinMode(13, OUTPUT);
 }
 
 void loop()
@@ -949,7 +980,7 @@ void loop()
     last_time_status = time_status;
   }
 
-  if (time_status == timeSet)
+  if ((time_status == timeSet) || (time_status == timeNotSet))
   {
     switch (minute())
     {
@@ -962,8 +993,8 @@ void loop()
         {
           if (second() == mode_params[cur_mode].start_time)
           {
+            set_tx_buffer(tx_buffer);
             encode(tx_buffer, show_transmit_status);
-            delay(1000);
           }
         }
         break;
