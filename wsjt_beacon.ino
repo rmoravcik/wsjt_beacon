@@ -26,7 +26,7 @@
 #define EEPROM_MODE      0
 #define EEPROM_FREQUENCY 1
 
-#define VERSION_STRING   "v1.0.5"
+#define VERSION_STRING   "v1.0.6"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -35,19 +35,19 @@ const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x8
 const uint8_t battery_indicator[2] = { 0xBD, 0xBD };
 
 const struct mode_param mode_params[MODE_COUNT] {
- { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, jt9_freqs  },
- { "JT65", JT65_SYMBOL_COUNT, 269, 371, jt65_freqs },
+ { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, 0, jt9_freqs  },
+ { "JT65", JT65_SYMBOL_COUNT, 269, 371, 0, jt65_freqs },
 /*
- { "JT4",  JT4_SYMBOL_COUNT,  437, 229, NULL       },
+ { "JT4",  JT4_SYMBOL_COUNT,  437, 229, 0, NULL       },
 */
- { "WSPR", WSPR_SYMBOL_COUNT, 146, 683, wspr_freqs },
+ { "WSPR", WSPR_SYMBOL_COUNT, 146, 683, 1, wspr_freqs },
 /*
- { "FSQ2", 0,                 879, 500, NULL       },
- { "FSQ3", 0,                 879, 333, NULL       },
- { "FSQ4", 0,                 879, 222, NULL       },
- { "FSQ5", 0,                 879, 167, NULL       },
+ { "FSQ2", 0,                 879, 500, 0, NULL       },
+ { "FSQ3", 0,                 879, 333, 0, NULL       },
+ { "FSQ4", 0,                 879, 222, 0, NULL       },
+ { "FSQ5", 0,                 879, 167, 0, NULL       },
 */
- { "FT8 ", FT8_SYMBOL_COUNT,  628, 159, ft8_freqs  }
+ { "FT8 ", FT8_SYMBOL_COUNT,  628, 159, 0, ft8_freqs  }
 };
 
 #define GPS_PPS_PIN           10
@@ -77,7 +77,9 @@ uint8_t cur_screen = SCREEN_COUNT;
 bool refresh_screen = false;
 
 bool edit_mode = false;
-bool edit_mode_blink_toggle = false;
+bool blink_toggle = false;
+bool tx_active = false;
+volatile uint8_t tx_timeout = 0;
 
 #define CAL_FREQ         (2500000ULL)
 #define CAL_TIME_SECONDS (40UL)
@@ -143,6 +145,13 @@ static void write_config(void)
   EEPROM.write(EEPROM_FREQUENCY, sel_freq);
 }
 
+ISR(TCA0_CMP0_vect)
+{
+  tx_timeout--;
+  TCA0.SINGLE.CNT = 0;
+  TCA0.SINGLE.INTFLAGS = TCA_SINGLE_CMP0EN_bm;
+}
+
 // Loop through the string, transmitting one character at a time.
 static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
 {
@@ -150,6 +159,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
 
   // Reset the tone to the base frequency and turn on the output
   si5351.set_clock_pwr(SI5351_CLK0, 1);
+  tx_active = true;
     
 /*
   // Now transmit the channel symbols
@@ -166,15 +176,22 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   for (i = 0; i < mode_params[cur_mode].symbol_count; i++)
   {
       si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
+
+      // Wait for timer expire
+      TCA0.SINGLE.CMP0 = mode_params[cur_mode].tone_delay * 25;
+      TCA0.SINGLE.CNT = 0;
+      tx_timeout = 10;
+
       if (cb != NULL)
       {
         cb();
       }
-      delay(mode_params[cur_mode].tone_delay);
+      while (tx_timeout > 0) {};
   }
 
   // Turn off the output
   si5351.set_clock_pwr(SI5351_CLK0, 0);
+  tx_active = false;
 }
 
 static void set_tx_buffer(uint8_t *tx_buffer)
@@ -240,25 +257,38 @@ static void process_sync_message()
   }
 }
 
-static void pps_interrupt()
+static void init_tca0(const bool cal_mode)
 {
-  if (cal_timeout == 0)
+  if (cal_mode == true)
   {
     TCA0.SINGLE.CTRLA = 0;
     TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
     TCA0.SINGLE.EVCTRL = TCA_SINGLE_EVACT_POSEDGE_gc | TCA_SINGLE_CNTEI_bm;
     TCA0.SINGLE.INTCTRL = TCA_SINGLE_OVF_bm;
     TCA0.SINGLE.CTRLA = TCA_SINGLE_ENABLE_bm;
+  }
+  else
+  {
+    TCA0.SINGLE.CTRLA = 0;
+    TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
+    TCA0.SINGLE.CTRLB = TCA_SINGLE_WGMODE_SINGLESLOPE_gc;
+    TCA0.SINGLE.PER = 0xFFFF;
+    TCA0.SINGLE.INTCTRL = TCA_SINGLE_CMP0EN_bm;
+    TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV64_gc | TCA_SINGLE_ENABLE_bm;
+  }
+}
+
+static void pps_interrupt()
+{
+  if (cal_timeout == 0)
+  {
+    init_tca0(true);
     timer0_ovf_counter = 0;
   }
   else if (cal_timeout == CAL_TIME_SECONDS)
   {
     timer0_count = TCA0.SINGLE.CNT;
-    TCA0.SINGLE.CTRLA = 0;
-    TCA0.SINGLE.CTRLESET = TCA_SPLIT_CMD_RESET_gc | 0x03;  // Reset TCA0
-    TCA0.SINGLE.CTRLB = TCA_SINGLE_WGMODE_SINGLESLOPE_gc;
-    TCA0.SINGLE.PER = PWM_TIMER_PERIOD;
-    TCA0.SINGLE.CTRLA = TCA_SINGLE_CLKSEL_DIV64_gc | TCA_SINGLE_ENABLE_bm;
+    init_tca0(false);
   }
   cal_timeout++;
 }
@@ -336,15 +366,15 @@ static void display_mode(const char *text)
 {
   if (edit_mode == true)
   {
-    if (edit_mode_blink_toggle == true)
+    if (blink_toggle == true)
     {
        ssd1306_negativeMode();
-       edit_mode_blink_toggle = false;
+       blink_toggle = false;
     }
     else
     {
        ssd1306_positiveMode();
-       edit_mode_blink_toggle = true;
+       blink_toggle = true;
     }
   }
 
@@ -361,15 +391,26 @@ static void display_frequency(const uint32_t value, const char *unit)
 
   if (edit_mode == true)
   {
-    if (edit_mode_blink_toggle == true)
+    if (blink_toggle == true)
     {
        ssd1306_negativeMode();
-       edit_mode_blink_toggle = false;
+       blink_toggle = false;
     }
     else
     {
        ssd1306_positiveMode();
-       edit_mode_blink_toggle = true;
+       blink_toggle = true;
+    }
+  }
+  else
+  {
+    if (tx_active == true)
+    {
+      ssd1306_negativeMode();
+    }
+    else
+    {
+      ssd1306_positiveMode();
     }
   }
 
@@ -437,7 +478,7 @@ static int8_t get_new_value(void)
       DEBUGLN("Leaving edit mode");
       write_config();
       edit_mode = false;
-      edit_mode_blink_toggle = false;
+      blink_toggle = false;
     }
 
     int32_t new_position = encoder.read();
@@ -470,7 +511,6 @@ static int8_t get_new_value(void)
 
 static void draw_gps_symbol(void)
 {
-  static bool toggle = false;
   unsigned long age = TinyGPS::GPS_INVALID_FIX_TIME;
 
   gps.get_position(NULL, NULL, &age);
@@ -481,7 +521,7 @@ static void draw_gps_symbol(void)
   }
   else
   {
-    if (toggle)
+    if (blink_toggle)
     {
       ssd1306_drawBuffer(0, 0, 8, 8, gps_icon);
     }
@@ -489,7 +529,7 @@ static void draw_gps_symbol(void)
     {
       ssd1306_clearBlock(0, 0, 8, 8);
     }
-    toggle = !toggle;
+    blink_toggle = !blink_toggle;
   }
 }
 
@@ -522,19 +562,31 @@ static void draw_battery(void)
 
 static void draw_clock(void)
 {
-  static int last_minute = -1;
-  int cur_minute = minute();
+  char buf[6];
 
-  if (cur_minute != last_minute)
+  ssd1306_setFixedFont(ssd1306xled_font6x8);
+  sprintf(buf, "%02d:%02d", hour(), minute());
+  ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
+}
+
+static void draw_enable_status(const bool enabled)
+{
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+
+  if (enabled == false)
   {
-    char buf[6];
-
-    ssd1306_setFixedFont(ssd1306xled_font6x8);
-    sprintf(buf, "%02d:%02d", hour(), cur_minute);
-    ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
-
-    last_minute = cur_minute;
+    ssd1306_printFixed(40,  24, "Enable ", STYLE_NORMAL);
   }
+  else
+  {
+    ssd1306_printFixed(40,  24, "Disable", STYLE_NORMAL);
+  }
+}
+
+static void show_transmit_status(void)
+{
+  draw_clock();
+  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 }
 
 static void show_status_screen(void)
@@ -545,7 +597,6 @@ static void show_status_screen(void)
     ssd1306_setFixedFont(ssd1306xled_font6x8);
     ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
     ssd1306_printFixed( 52, 56, mode_params[cur_mode].mode_name, STYLE_NORMAL);
-    display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
   }
 
   ssd1306_setFixedFont(ssd1306xled_font6x8);
@@ -554,6 +605,8 @@ static void show_status_screen(void)
   draw_clock();
   draw_gps_symbol();
   draw_battery();
+
+  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
 }
 
 static void show_set_mode_screen(void)
@@ -714,35 +767,33 @@ static void show_calibration_screen(void)
 
 static void show_transmitter_screen(void)
 {
-  static bool enabled;
   get_new_value();
 
   if (refresh_screen == false)
   {
     ssd1306_clearScreen();
     display_header("Transmitter");
-    enabled = true;
+    draw_enable_status(false);
+    tx_active = false;
   }
-
-  ssd1306_setFixedFont(ssd1306xled_font8x16);
 
   if (edit_mode == false)
   {
-    if (enabled == true)
+    if (tx_active == true)
     {
-      ssd1306_printFixed(40,  24, "Enable ", STYLE_NORMAL);
+      draw_enable_status(false);
       si5351.set_clock_pwr(SI5351_CLK0, 0);
-      enabled = false;
+      tx_active = false;
     }
   }
   else
   {
-    if (enabled == false)
+    if (tx_active == false)
     {
-      ssd1306_printFixed(40,  24, "Disable", STYLE_NORMAL);
+      draw_enable_status(true);
       si5351.set_clock_pwr(SI5351_CLK0, 1);
       si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
-      enabled = true;
+      tx_active = true;
     }
   }
 }
@@ -827,8 +878,9 @@ void setup()
   DEBUGLN("Encoder setup...");
   encoder_button.begin();
 
-  DEBUGLN("Initialize EVSYS...");
+  DEBUGLN("Initialize timer...");
   init_evsys();
+  init_tca0(false);
 
   DEBUGLN("ADC setup...");
   analogReference(INTERNAL1V1);
@@ -881,7 +933,7 @@ void loop()
     last_time_status = time_status;
   }
 
-  if (time_status == timeSet)
+  if ((time_status == timeSet) || (time_status == timeNotSet))
   {
     switch (minute())
     {
@@ -892,16 +944,10 @@ void loop()
       case 40:
       case 50:
         {
-          if (second() == 1)
+          if (second() == mode_params[cur_mode].start_time)
           {
-            ssd1306_negativeMode();
-            display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
-
-            encode(tx_buffer, draw_clock);
+            encode(tx_buffer, show_transmit_status);
             delay(1000);
-
-            ssd1306_positiveMode();
-            display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
           }
         }
         break;
@@ -909,7 +955,10 @@ void loop()
       case 15:
       case 45:
         {
-          calibration(show_calibration_progress);
+          if (second() == 0)
+          {
+            calibration(show_calibration_progress);
+          }
         }
         break;
 

@@ -49,6 +49,7 @@ struct mode_param {
   uint16_t symbol_count;
   uint16_t tone_spacing;
   uint16_t tone_delay;
+  uint8_t start_time;
   const uint32_t *freqs;
 };
 
