@@ -23,10 +23,11 @@
 #define DEBUGLN(x)
 #endif
 
-#define EEPROM_MODE      0
-#define EEPROM_FREQUENCY 1
+#define EEPROM_MODE       0
+#define EEPROM_FREQUENCY  1
+#define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.7"
+#define VERSION_STRING   "v1.0.8"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -126,6 +127,8 @@ void calc_grid_square(float lat, float lon)
 
 static void read_config(void)
 {
+  uint8_t factor[4];
+
   cur_mode = EEPROM.read(EEPROM_MODE);
   if (cur_mode > MODE_COUNT)
   {
@@ -137,12 +140,28 @@ static void read_config(void)
   {
     sel_freq = BAND_20M;
   } 
+
+  factor[3] = EEPROM.read(EEPROM_CAL_FACTOR);
+  factor[2] = EEPROM.read(EEPROM_CAL_FACTOR + 1);
+  factor[1] = EEPROM.read(EEPROM_CAL_FACTOR + 2);
+  factor[0] = EEPROM.read(EEPROM_CAL_FACTOR + 3);
+
+  cal_factor = (uint32_t)factor[3] << 24 | (uint32_t)factor[2] << 16 | (uint32_t)factor[1] << 8 | (uint32_t)factor[0];
+
+  if (cal_factor == -1)
+  {
+    cal_factor = 0;
+  }
 }
 
 static void write_config(void)
 {
   EEPROM.write(EEPROM_MODE, cur_mode);
   EEPROM.write(EEPROM_FREQUENCY, sel_freq);
+  EEPROM.write(EEPROM_CAL_FACTOR,     (cal_factor >> 24) & 0xFF);
+  EEPROM.write(EEPROM_CAL_FACTOR + 1, (cal_factor >> 16) & 0xFF);
+  EEPROM.write(EEPROM_CAL_FACTOR + 2, (cal_factor >>  8) & 0xFF);
+  EEPROM.write(EEPROM_CAL_FACTOR + 3, cal_factor & 0xFF);
 }
 
 ISR(TCA0_CMP0_vect)
@@ -762,6 +781,7 @@ static void show_calibration_screen(void)
   else
   {
     calibration(show_calibration_progress);
+    write_config();
     edit_mode = false;
   }
 }
