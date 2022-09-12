@@ -27,7 +27,7 @@
 #define EEPROM_FREQUENCY  1
 #define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.10"
+#define VERSION_STRING   "v1.0.11"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -853,6 +853,15 @@ static void show_version_screen(void)
   }
 }
 
+static void force_switch_to_status_screen(void)
+{
+  if (cur_screen != SCREEN_STATUS)
+  {
+    cur_screen = SCREEN_STATUS;
+    show_status_screen();
+  }
+}
+
 static void show_screen(void)
 {
   uint8_t next_screen = get_next_screen();
@@ -990,6 +999,7 @@ void loop()
         {
           if (second() == mode_params[cur_mode].start_time)
           {
+            force_switch_to_status_screen();
             encode(tx_buffer, show_transmit_status);
           }
         }
@@ -1000,6 +1010,7 @@ void loop()
         {
           if (second() == 0)
           {
+            force_switch_to_status_screen();
             calibration(show_calibration_progress);
           }
         }
@@ -1017,4 +1028,4 @@ void loop()
     refresh_screen = true;
     last_update = millis();
   }
-} 
+}
