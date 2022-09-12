@@ -27,7 +27,7 @@
 #define EEPROM_FREQUENCY  1
 #define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.8"
+#define VERSION_STRING   "v1.0.9"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -427,7 +427,7 @@ static void display_frequency(const uint32_t value)
   char text[13];
 
   sprintf(text, "%3d.%04d MHz", freq1, freq2);
-  display_variable(48, 24, text);
+  display_variable(16, 24, text);
 }
 
 static uint8_t get_next_screen(void)
@@ -729,12 +729,12 @@ static void show_gps_status_screen(void)
 
   int16_t lat1 = lat / 1000000;
   int16_t lat2 = (lat / 1000) % 1000;
-  sprintf(buf, "Lat.: %02ld.%03ld", lat1, lat2);
+  sprintf(buf, "Lat.: %02d.%03d", lat1, lat2);
   ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
 
   int16_t lon1 = lon / 1000000;
   int16_t lon2 = (lon / 1000) % 1000;
-  sprintf(buf, "Lon.: %02ld.%03ld", lon1, lon2);
+  sprintf(buf, "Lon.: %02d.%03d", lon1, lon2);
   ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
 
   sprintf(buf, "Age : %4ld", age);
@@ -963,7 +963,7 @@ void loop()
     last_time_status = time_status;
   }
 
-  if ((time_status == timeSet) || (time_status == timeNotSet))
+  if (time_status == timeSet)
   {
     switch (minute())
     {
@@ -976,7 +976,6 @@ void loop()
         {
           if (second() == mode_params[cur_mode].start_time)
           {
-            set_tx_buffer(tx_buffer);
             encode(tx_buffer, show_transmit_status);
           }
         }
