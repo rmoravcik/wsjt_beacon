@@ -27,7 +27,7 @@
 #define EEPROM_FREQUENCY  1
 #define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.11"
+#define VERSION_STRING   "v1.0.12"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -570,7 +570,7 @@ static void draw_battery(void)
     cur_bars = 0;
   }
 
-  if (last_bars != cur_bars)
+  if ((last_bars != cur_bars) || (refresh_screen == false))
   {
     ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
