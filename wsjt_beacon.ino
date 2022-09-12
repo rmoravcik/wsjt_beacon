@@ -178,7 +178,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
     
   DEBUGLN("Transmitting TX buffer...");
 
-  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+  display_frequency(mode_params[cur_mode].freqs[sel_freq]);
 
 /*
   // Now transmit the channel symbols
@@ -383,33 +383,8 @@ static void display_header(const char *text)
   ssd1306_printFixed(x, 0, text, STYLE_BOLD);
 }
 
-static void display_mode(const char *text)
+static void display_variable(const uint8_t x, const uint8_t y, const char* text)
 {
-  if (edit_mode == true)
-  {
-    if (blink_toggle == true)
-    {
-       ssd1306_negativeMode();
-       blink_toggle = false;
-    }
-    else
-    {
-       ssd1306_positiveMode();
-       blink_toggle = true;
-    }
-  }
-
-  ssd1306_setFixedFont(ssd1306xled_font8x16);
-  ssd1306_printFixed(48, 24, text, STYLE_NORMAL);
-  ssd1306_positiveMode();
-}
-
-static void display_frequency(const uint32_t value, const char *unit)
-{
-  uint16_t freq1 = value / 1000000;
-  uint16_t freq2 = (value / 100) % 1000;
-  char text[13];
-
   if (edit_mode == true)
   {
     if (blink_toggle == true)
@@ -435,11 +410,24 @@ static void display_frequency(const uint32_t value, const char *unit)
     }
   }
 
-  sprintf(text, "%3d.%04d %3s", freq1, freq2, unit);
-
   ssd1306_setFixedFont(ssd1306xled_font8x16);
-  ssd1306_printFixed(16,  24, text, STYLE_NORMAL);
+  ssd1306_printFixed(x,  y, text, STYLE_NORMAL);
   ssd1306_positiveMode();
+}
+
+static void display_mode(const char *text)
+{
+  display_variable(48, 24, text);
+}
+
+static void display_frequency(const uint32_t value)
+{
+  uint16_t freq1 = value / 1000000;
+  uint16_t freq2 = (value / 100) % 1000;
+  char text[13];
+
+  sprintf(text, "%3d.%04d MHz", freq1, freq2);
+  display_variable(48, 24, text);
 }
 
 static uint8_t get_next_screen(void)
@@ -593,7 +581,6 @@ static void draw_clock(void)
   }
   else
   {
-
     if (last_minute != cur_minute)
     {
       draw = true;
@@ -648,7 +635,7 @@ static void show_status_screen(void)
   draw_gps_symbol();
   draw_battery();
 
-  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+  display_frequency(mode_params[cur_mode].freqs[sel_freq]);
 }
 
 static void show_set_mode_screen(void)
@@ -716,7 +703,7 @@ static void show_set_frequency_screen(void)
     display_header("Frequency");
   }
 
-  display_frequency(mode_params[cur_mode].freqs[sel_freq], "MHz");
+  display_frequency(mode_params[cur_mode].freqs[sel_freq]);
 }
 
 static void show_gps_status_screen(void)
@@ -742,12 +729,12 @@ static void show_gps_status_screen(void)
 
   int16_t lat1 = lat / 1000000;
   int16_t lat2 = (lat / 1000) % 1000;
-  sprintf(buf, "Lat.: %02d.%03d", lat1, lat2);
+  sprintf(buf, "Lat.: %02ld.%03ld", lat1, lat2);
   ssd1306_printFixed( 0, 24, buf, STYLE_NORMAL);
 
   int16_t lon1 = lon / 1000000;
   int16_t lon2 = (lon / 1000) % 1000;
-  sprintf(buf, "Lon.: %02d.%03d", lon1, lon2);
+  sprintf(buf, "Lon.: %02ld.%03ld", lon1, lon2);
   ssd1306_printFixed( 0, 32, buf, STYLE_NORMAL);
 
   sprintf(buf, "Age : %4ld", age);
