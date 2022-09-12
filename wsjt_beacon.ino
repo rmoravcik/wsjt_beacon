@@ -27,13 +27,13 @@
 #define EEPROM_FREQUENCY  1
 #define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.9"
+#define VERSION_STRING   "v1.0.10"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
                                    0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF, 0x3C,
                                    0x3C };
-const uint8_t battery_indicator[2] = { 0xBD, 0xBD };
+const uint8_t battery_bar[2] = { 0xBD, 0xBD };
 
 const struct mode_param mode_params[MODE_COUNT] {
  { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, 0, jt9_freqs  },
@@ -544,28 +544,42 @@ static void draw_gps_symbol(void)
 
 static void draw_battery(void)
 {
+  static uint8_t last_bars = 0xFF;
+  uint8_t cur_bars = 0;
+
   int16_t raw = analogRead(BATTERY_PIN);
-
-  ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
-
-  if (raw >= 815)
-  {
-    ssd1306_drawBuffer(112, 0, 2, 8, battery_indicator);
-  }
-
-  if (raw >= 860)
-  {
-    ssd1306_drawBuffer(115, 0, 2, 8, battery_indicator);
-  }
-
-  if (raw >= 906)
-  {
-    ssd1306_drawBuffer(118, 0, 2, 8, battery_indicator);
-  }
 
   if (raw >= 930)
   {
-    ssd1306_drawBuffer(121, 0, 2, 8, battery_indicator);
+    cur_bars = 4;
+  }
+  else if (raw >= 906)
+  {
+    cur_bars = 3;
+  }
+  else if (raw >= 860)
+  {
+    cur_bars = 2;
+  }
+  else if (raw >= 815)
+  {
+    cur_bars = 1;
+  }
+  else
+  {
+    cur_bars = 0;
+  }
+
+  if (last_bars != cur_bars)
+  {
+    ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
+
+    for (uint8_t i = 0; i < cur_bars; i++)
+    {
+      ssd1306_drawBuffer(112 + (i * 3), 0, 2, 8, battery_bar);
+    }
+
+    last_bars = cur_bars;
   }
 }
 
