@@ -27,7 +27,7 @@
 #define EEPROM_FREQUENCY  1
 #define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.12"
+#define VERSION_STRING   "v1.0.13"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -91,6 +91,30 @@ static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
 
 typedef void (*cal_refresh_cb)(void);
+
+/* This function returns the DST offset for the current UTC time.
+ * This is valid for the EU, for other places see
+ * http://www.webexhibits.org/daylightsaving/i.html
+ *
+ * Results have been checked for 2012-2030 (but should work since
+ * 1996 to 2099) against the following references:
+ * - http://www.uniquevisitor.it/magazine/ora-legale-italia.php
+ * - http://www.calendario-365.it/ora-legale-orario-invernale.html
+ */
+byte dstOffset (byte d, byte m, unsigned int y, byte h) {
+  // Day in March that DST starts on, at 1 am
+  byte dstOn = (31 - (5 * y / 4 + 4) % 7);
+
+  // Day in October that DST ends  on, at 2 am
+  byte dstOff = (31 - (5 * y / 4 + 1) % 7);
+
+  if ((m > 3 && m < 10) ||
+      (m == 3 && (d > dstOn || (d == dstOn && h >= 1))) ||
+      (m == 10 && (d < dstOff || (d == dstOff && h <= 1))))
+    return 1;
+  else
+    return 0;
+}
 
 // Overtaken from https://github.com/W3PM/GPS-Display-and-Time-Grid-Square-Synchronization-Source/blob/master/GPS_display_source_v2_4a.ino
 void calc_grid_square(float lat, float lon)
@@ -274,7 +298,7 @@ static void process_sync_message()
     {
       // Set the Time to the latest GPS reading
       setTime(Hour, Minute, Second, Day, Month, Year);
-      adjustTime(offset * SECS_PER_HOUR);
+      adjustTime((offset + dstOffset(Day, Month, Year, Hour)) * SECS_PER_HOUR);
     }
   }
 }
