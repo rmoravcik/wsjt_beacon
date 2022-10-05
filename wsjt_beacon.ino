@@ -448,10 +448,10 @@ static void display_frequency(const uint32_t value)
 {
   uint16_t freq1 = value / 1000000;
   uint16_t freq2 = (value / 100) % 1000;
-  char text[13];
+  char text[16];
 
-  sprintf(text, "%3d.%04d MHz", freq1, freq2);
-  display_variable(16, 24, text);
+  sprintf(text, "% 3d.%04d MHz  ", freq1, freq2);
+  display_variable(8, 24, text);
 }
 
 static uint8_t get_next_screen(void)
@@ -542,13 +542,23 @@ static int8_t get_new_value(void)
   return 0;
 }
 
-static void draw_gps_symbol(void)
+static bool is_gps_fix(void)
 {
   unsigned long age = TinyGPS::GPS_INVALID_FIX_TIME;
 
   gps.get_position(NULL, NULL, &age);
 
   if (age < 5000)
+  {
+    return true;
+  }
+
+  return false;
+}
+
+static void draw_gps_symbol(void)
+{
+  if (is_gps_fix())
   {
     ssd1306_drawBuffer(0, 0, 8, 8, gps_icon);
   }
@@ -1034,8 +1044,11 @@ void loop()
         {
           if (second() == 0)
           {
-            force_switch_to_status_screen();
-            calibration(show_calibration_progress);
+            if (is_gps_fix())
+            {
+              force_switch_to_status_screen();
+              calibration(show_calibration_progress);
+            }
           }
         }
         break;
