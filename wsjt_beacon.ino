@@ -450,7 +450,7 @@ static void display_frequency(const uint32_t value)
   uint16_t freq2 = (value / 100) % 1000;
   char text[16];
 
-  sprintf(text, "% 3d.%04d MHz  ", freq1, freq2);
+  sprintf(text, " %3d.%04d MHz  ", freq1, freq2);
   display_variable(8, 24, text);
 }
 
@@ -892,8 +892,13 @@ static void force_switch_to_status_screen(void)
   if (cur_screen != SCREEN_STATUS)
   {
     cur_screen = SCREEN_STATUS;
-    show_status_screen();
   }
+  else
+  {
+    refresh_screen = true;
+  }
+
+  show_status_screen();
 }
 
 static void show_screen(void)
@@ -1002,6 +1007,7 @@ void loop()
 
           if (cal_factor_valid == false)
           {
+            force_switch_to_status_screen();
             calibration(show_calibration_progress);
           }
         }
