@@ -1,0 +1,3 @@
+[submodule "src/Time"]
+	path = src/Time
+	url = git@github.com:rmoravcik/Time.git

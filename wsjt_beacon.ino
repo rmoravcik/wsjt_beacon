@@ -3,10 +3,10 @@
 #include <si5351.h>
 #include <JTEncode.h>
 #include <int.h>
-#include <TimeLib.h>
+#include "src/Time/TimeLib.h"
 #include <TinyGPS.h>
 #include <Encoder.h>
-#include "ssd1306.h"
+#include <ssd1306.h>
 #include <EEPROM.h>
 #include <Button.h>
 
@@ -641,7 +641,7 @@ static void draw_clock(void)
     char buf[6];
 
     ssd1306_setFixedFont(ssd1306xled_font6x8);
-    sprintf(buf, "%02d:%02d", hour(), cur_minute);
+    sprintf(buf, "%02u:%02u", hour(), cur_minute);
     ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
   }
 }
@@ -1013,12 +1013,6 @@ void loop()
         }
         break;
 
-      case timeNeedsSync:
-        {
-          cal_factor_valid = false;
-        }
-        break;
-
       default:
         break;
     }
@@ -1026,7 +1020,7 @@ void loop()
     last_time_status = time_status;
   }
 
-  if (time_status == timeSet)
+  if (time_status != timeNotSet)
   {
     switch (minute())
     {
