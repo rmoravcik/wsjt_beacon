@@ -183,6 +183,20 @@ static void write_config(void)
   EEPROM.write(EEPROM_CAL_FACTOR + 3, (cal_factor)       & 0xFF);
 }
 
+static bool is_gps_fixed(void)
+{
+  unsigned long age = TinyGPS::GPS_INVALID_FIX_TIME;
+
+  gps.get_position(NULL, NULL, &age);
+
+  if (age < 5000)
+  {
+    return true;
+  }
+
+  return false;
+}
+
 ISR(TCA0_CMP0_vect)
 {
   tx_timeout--;
@@ -385,7 +399,7 @@ static void calibration(cal_refresh_cb cb)
   DEBUG("new cal_factor=");
   DEBUGLN(pulse_diff);
 
-  if ((cal_factor < 1000000) && (cal_factor > -1000000))
+  if ((pulse_diff < 1000000) && (pulse_diff > -1000000))
   {
     cal_factor_valid = true;
     cal_factor = pulse_diff;
@@ -538,23 +552,9 @@ static int8_t get_new_value(void)
   return 0;
 }
 
-static bool is_gps_fix(void)
-{
-  unsigned long age = TinyGPS::GPS_INVALID_FIX_TIME;
-
-  gps.get_position(NULL, NULL, &age);
-
-  if (age < 5000)
-  {
-    return true;
-  }
-
-  return false;
-}
-
 static void draw_gps_symbol(void)
 {
-  if (is_gps_fix())
+  if (is_gps_fixed())
   {
     ssd1306_drawBuffer(0, 0, 8, 8, gps_icon);
   }
@@ -791,6 +791,17 @@ static void show_gps_status_screen(void)
   ssd1306_printFixed( 0, 56, buf, STYLE_NORMAL);
 }
 
+static void show_calbration_status(void)
+{
+  refresh_screen = true;
+  draw_clock();
+
+  ssd1306_negativeMode();
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+  ssd1306_printFixed(8, 24, "C", STYLE_NORMAL);
+  ssd1306_positiveMode();
+}
+
 static void show_calibration_progress(void)
 {
   static uint8_t counter = 0;
@@ -1004,7 +1015,7 @@ void loop()
           if (cal_factor_valid == false)
           {
             force_switch_to_status_screen();
-            calibration(show_calibration_progress);
+            calibration(show_calbration_status);
           }
         }
         break;
@@ -1040,10 +1051,10 @@ void loop()
         {
           if (second() == 0)
           {
-            if (is_gps_fix())
+            if (is_gps_fixed())
             {
               force_switch_to_status_screen();
-              calibration(show_calibration_progress);
+              calibration(show_calbration_status);
             }
           }
         }
