@@ -1,6 +1,6 @@
 // Based on Si5351_WSPR_2560.ino by Jason Milldrum NT7S.
 
-#include <si5351.h>
+#include "src/Si5351Arduino/src/si5351.h"
 #include <JTEncode.h>
 #include <int.h>
 #include "src/Time/TimeLib.h"
@@ -27,7 +27,7 @@
 #define EEPROM_FREQUENCY  1
 #define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.14"
+#define VERSION_STRING   "v1.0.15"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -82,11 +82,14 @@ bool blink_toggle = false;
 bool tx_active = false;
 volatile int8_t tx_timeout = 0;
 
-#define CAL_FREQ         (2500000ULL)
-#define CAL_TIME_SECONDS (40UL)
+#define CAL_FREQ             (2500000ULL)
+#define CAL_TIME_SECONDS     (40UL)
+#define CAL_TIMEOUT_SECONDS  (CAL_TIME_SECONDS + 1)
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
-volatile uint8_t cal_timeout = CAL_TIME_SECONDS;
+volatile uint8_t cal_timeout = CAL_TIMEOUT_SECONDS;
+volatile uint8_t last_cal_timeout = 0;
+volatile uint8_t cal_watchdog = 0;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
 
@@ -338,6 +341,36 @@ static void init_tca0(const bool cal_mode)
   }
 }
 
+static void pit_interrupt()
+{
+  if (cal_timeout < CAL_TIME_SECONDS)
+  {
+    DEBUG("PIT: last_cal_timeout=");
+    DEBUG(last_cal_timeout);
+    DEBUG(" cal_timeout=");
+    DEBUGLN(cal_timeout);
+
+    if (last_cal_timeout == cal_timeout)
+    {
+      cal_watchdog++;
+    }
+    else
+    {
+      cal_watchdog = 0;
+    }
+
+    if (cal_watchdog >= 3)
+    {
+      // Timeout
+      DEBUGLN("GPS lost during calibration!");
+      cal_timeout = CAL_TIMEOUT_SECONDS;
+      init_tca0(false);
+    }
+
+    last_cal_timeout = cal_timeout;
+  }
+}
+
 static void pps_interrupt()
 {
   if (cal_timeout == 0)
@@ -350,7 +383,10 @@ static void pps_interrupt()
     timer0_count = TCA0.SINGLE.CNT;
     init_tca0(false);
   }
-  cal_timeout++;
+  if (cal_timeout < CAL_TIMEOUT_SECONDS)
+  {
+    cal_timeout++;
+  }
 }
 
 ISR(TCA0_OVF_vect)
@@ -367,29 +403,28 @@ static void init_evsys(void)
 
 static void calibration(cal_refresh_cb cb)
 {
-  uint8_t prev_cal_timeout = 0;
+  uint8_t prev_cal_timeout = CAL_TIMEOUT_SECONDS;
+  last_cal_timeout = CAL_TIMEOUT_SECONDS;
+
+  DEBUGLN("Calibration started...");
+
+//  // Let's stabilize GPS 
+//  si5351.set_clock_pwr(SI5351_CLK2, 1);
+//  delay(20000);
+
   cal_timeout = 0;
-
-  DEBUG("Calibration started");
-
-  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
-
-  si5351.set_clock_pwr(SI5351_CLK2, 1);
+  cal_watchdog = 0;
 
   do {
     if (prev_cal_timeout != cal_timeout)
     {
-      DEBUG(".");
       if (cb != NULL)
       {
         (*cb)();
       }
     }
     prev_cal_timeout = cal_timeout;
-  } while (cal_timeout < CAL_TIME_SECONDS + 1);
-  DEBUGLN("");
-
-  detachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN));
+  } while (cal_timeout < CAL_TIMEOUT_SECONDS);
 
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
@@ -407,7 +442,7 @@ static void calibration(cal_refresh_cb cb)
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
-  si5351.set_clock_pwr(SI5351_CLK2, 0);
+//  si5351.set_clock_pwr(SI5351_CLK2, 0);
 }
 
 static void display_header(const char *text)
@@ -962,6 +997,7 @@ void setup()
   DEBUGLN("Si5351 setup...");
   pinMode(CAL_SIGNAL_PIN, INPUT);
   si5351.init(SI5351_CRYSTAL_LOAD_10PF, SI5351_XTAL_FREQ, cal_factor);
+  attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
 
   // Set CLK0 output
   si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
@@ -971,8 +1007,8 @@ void setup()
   // Set CLK2 output
   si5351.set_ms_source(SI5351_CLK2, SI5351_PLLB);
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
-  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
-  si5351.set_clock_pwr(SI5351_CLK2, 0);
+//  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
+//  si5351.set_clock_pwr(SI5351_CLK2, 0);
 
   DEBUGLN("Encoder setup...");
   encoder_button.begin();
@@ -980,6 +1016,7 @@ void setup()
   DEBUGLN("Initialize timer...");
   init_evsys();
   init_tca0(false);
+  InternalRTC.attachInterrupt(pit_interrupt);
 
   DEBUGLN("ADC setup...");
   analogReference(INTERNAL1V1);

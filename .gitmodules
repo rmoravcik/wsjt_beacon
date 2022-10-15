@@ -1,3 +1,6 @@
 [submodule "src/Time"]
 	path = src/Time
 	url = git@github.com:rmoravcik/Time.git
+[submodule "src/Si5351Arduino"]
+	path = src/Si5351Arduino
+	url = git@github.com:rmoravcik/Si5351Arduino.git
