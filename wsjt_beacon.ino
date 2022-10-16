@@ -27,7 +27,7 @@
 #define EEPROM_FREQUENCY  1
 #define EEPROM_CAL_FACTOR 2
 
-#define VERSION_STRING   "v1.0.15"
+#define VERSION_STRING   "v1.0.16"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -88,7 +88,7 @@ volatile int8_t tx_timeout = 0;
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
 volatile uint8_t cal_timeout = CAL_TIMEOUT_SECONDS;
-volatile uint8_t last_cal_timeout = 0;
+volatile uint8_t cal_watchdog_last_timout = 0;
 volatile uint8_t cal_watchdog = 0;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
@@ -154,6 +154,8 @@ void calc_grid_square(float lat, float lon)
 
 static void read_config(void)
 {
+  DEBUGLN("Reading EEPROM configuration...");
+
   cur_mode = EEPROM.read(EEPROM_MODE);
   if (cur_mode > MODE_COUNT)
   {
@@ -178,6 +180,8 @@ static void read_config(void)
 
 static void write_config(void)
 {
+  DEBUGLN("Writing EEPROM configuration...");
+
   EEPROM.write(EEPROM_MODE, cur_mode);
   EEPROM.write(EEPROM_FREQUENCY, sel_freq);
   EEPROM.write(EEPROM_CAL_FACTOR,     (cal_factor >> 24) & 0xFF);
@@ -345,12 +349,12 @@ static void pit_interrupt()
 {
   if (cal_timeout < CAL_TIME_SECONDS)
   {
-    DEBUG("PIT: last_cal_timeout=");
-    DEBUG(last_cal_timeout);
-    DEBUG(" cal_timeout=");
+    DEBUG("Calibration watchdog: prev/curr=");
+    DEBUG(cal_watchdog_last_timout);
+    DEBUG("/");
     DEBUGLN(cal_timeout);
 
-    if (last_cal_timeout == cal_timeout)
+    if (cal_watchdog_last_timout == cal_timeout)
     {
       cal_watchdog++;
     }
@@ -367,7 +371,7 @@ static void pit_interrupt()
       init_tca0(false);
     }
 
-    last_cal_timeout = cal_timeout;
+    cal_watchdog_last_timout = cal_timeout;
   }
 }
 
@@ -404,7 +408,7 @@ static void init_evsys(void)
 static void calibration(cal_refresh_cb cb)
 {
   uint8_t prev_cal_timeout = CAL_TIMEOUT_SECONDS;
-  last_cal_timeout = CAL_TIMEOUT_SECONDS;
+  cal_watchdog_last_timout = CAL_TIMEOUT_SECONDS;
 
   DEBUGLN("Calibration started...");
 
@@ -429,15 +433,17 @@ static void calibration(cal_refresh_cb cb)
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
 
-  DEBUG("measured_freq=");
-  DEBUGLN(pulse_count / CAL_TIME_SECONDS);
-  DEBUG("new cal_factor=");
+  DEBUG("Measured frequency: ");
+  DEBUG((float)(pulse_count / CAL_TIME_SECONDS));
+  DEBUGLN("Hz");
+  DEBUG("New calibration factor: ");
   DEBUGLN(pulse_diff);
 
   if ((pulse_diff < 1000000) && (pulse_diff > -1000000))
   {
     cal_factor_valid = true;
     cal_factor = pulse_diff;
+    write_config();
   }
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
@@ -880,7 +886,6 @@ static void show_calibration_screen(void)
   else
   {
     calibration(show_calibration_progress);
-    write_config();
     edit_mode = false;
   }
 }
@@ -983,7 +988,6 @@ void setup()
 {
   Serial.begin(115200);
 
-  DEBUGLN("Reading EEPROM configuration...");
   read_config();
 
   DEBUGLN("NEO-6M setup...");
