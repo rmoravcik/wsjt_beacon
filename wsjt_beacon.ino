@@ -23,32 +23,34 @@
 #define DEBUGLN(x)
 #endif
 
-#define EEPROM_MODE       0
-#define EEPROM_FREQUENCY  1
-#define EEPROM_CAL_FACTOR 2
+#define EEPROM_MODE         (0)
+#define EEPROM_BAND         (1)
+#define EEPROM_CAL_FACTOR   (2)
+#define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.0.16"
+#define VERSION_STRING   "v1.0.17"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
                                    0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0xFF, 0x3C,
-                                   0x3C };
+                                   0x3C
+                                 };
 const uint8_t battery_bar[2] = { 0xBD, 0xBD };
 
 const struct mode_param mode_params[MODE_COUNT] {
- { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, 0, jt9_freqs  },
- { "JT65", JT65_SYMBOL_COUNT, 269, 371, 0, jt65_freqs },
-/*
- { "JT4",  JT4_SYMBOL_COUNT,  437, 229, 0, NULL       },
-*/
- { "WSPR", WSPR_SYMBOL_COUNT, 146, 683, 1, wspr_freqs },
-/*
- { "FSQ2", 0,                 879, 500, 0, NULL       },
- { "FSQ3", 0,                 879, 333, 0, NULL       },
- { "FSQ4", 0,                 879, 222, 0, NULL       },
- { "FSQ5", 0,                 879, 167, 0, NULL       },
-*/
- { "FT8 ", FT8_SYMBOL_COUNT,  628, 159, 0, ft8_freqs  }
+  { "JT9 ", JT9_SYMBOL_COUNT,  174, 576, 0, jt9_freqs  },
+  { "JT65", JT65_SYMBOL_COUNT, 269, 371, 0, jt65_freqs },
+  /*
+    { "JT4",  JT4_SYMBOL_COUNT,  437, 229, 0, NULL       },
+  */
+  { "WSPR", WSPR_SYMBOL_COUNT, 146, 683, 1, wspr_freqs },
+  /*
+    { "FSQ2", 0,                 879, 500, 0, NULL       },
+    { "FSQ3", 0,                 879, 333, 0, NULL       },
+    { "FSQ4", 0,                 879, 222, 0, NULL       },
+    { "FSQ5", 0,                 879, 167, 0, NULL       },
+  */
+  { "FT8 ", FT8_SYMBOL_COUNT,  628, 159, 0, ft8_freqs  }
 };
 
 #define GPS_PPS_PIN           10
@@ -69,8 +71,9 @@ Button encoder_button(ENC_BUTTON_PIN);
 
 char loc[5] = "AA00";
 
-uint8_t sel_freq = BAND_20M;
+uint8_t cur_band = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
+uint8_t output_power[BAND_COUNT] = { OUTPUT_POWER_MAX_DBM };
 
 #define DISPLAY_REFRESH_TIME (1000)
 static uint8_t tx_buffer[255];
@@ -96,14 +99,14 @@ static bool cal_factor_valid = false;
 typedef void (*cal_refresh_cb)(void);
 
 /* This function returns the DST offset for the current UTC time.
- * This is valid for the EU, for other places see
- * http://www.webexhibits.org/daylightsaving/i.html
- *
- * Results have been checked for 2012-2030 (but should work since
- * 1996 to 2099) against the following references:
- * - http://www.uniquevisitor.it/magazine/ora-legale-italia.php
- * - http://www.calendario-365.it/ora-legale-orario-invernale.html
- */
+   This is valid for the EU, for other places see
+   http://www.webexhibits.org/daylightsaving/i.html
+
+   Results have been checked for 2012-2030 (but should work since
+   1996 to 2099) against the following references:
+   - http://www.uniquevisitor.it/magazine/ora-legale-italia.php
+   - http://www.calendario-365.it/ora-legale-orario-invernale.html
+*/
 byte dstOffset (byte d, byte m, unsigned int y, byte h) {
   // Day in March that DST starts on, at 1 am
   byte dstOn = (31 - (5 * y / 4 + 4) % 7);
@@ -131,25 +134,25 @@ void calc_grid_square(float lat, float lon)
   o1 = (int)(remainder / 20.0);
   remainder = remainder - (double)o1 * 20.0;
   o2 = (int)(remainder / 2.0);
-//  remainder = remainder - 2.0 * (double)o2;
-//  o3 = (int)(12.0 * remainder);
+  //  remainder = remainder - 2.0 * (double)o2;
+  //  o3 = (int)(12.0 * remainder);
 
   // latitude
   remainder = lat + 90.0;
   a1 = (int)(remainder / 10.0);
   remainder = remainder - (double)a1 * 10.0;
   a2 = (int)(remainder);
-//  remainder = remainder - (double)a2;
-//  a3 = (int)(24.0 * remainder);
+  //  remainder = remainder - (double)a2;
+  //  a3 = (int)(24.0 * remainder);
 
   loc[0] = (char)o1 + 'A';
   loc[1] = (char)a1 + 'A';
   loc[2] = (char)o2 + '0';
   loc[3] = (char)a2 + '0';
   loc[4] = (char)0;
-//  loc[4] = (char)o3 + 'A';
-//  loc[5] = (char)a3 + 'A';
-//  loc[6] = (char)0;
+  //  loc[4] = (char)o3 + 'A';
+  //  loc[5] = (char)a3 + 'A';
+  //  loc[6] = (char)0;
 }
 
 static void read_config(void)
@@ -162,11 +165,11 @@ static void read_config(void)
     cur_mode = MODE_WSPR;
   }
 
-  sel_freq = EEPROM.read(EEPROM_FREQUENCY);
-  if (sel_freq > BAND_COUNT)
+  cur_band = EEPROM.read(EEPROM_BAND);
+  if (cur_band > BAND_COUNT)
   {
-    sel_freq = BAND_20M;
-  } 
+    cur_band = BAND_20M;
+  }
 
   cal_factor  = (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR)     << 24;
   cal_factor |= (uint32_t)EEPROM.read(EEPROM_CAL_FACTOR + 1) << 16;
@@ -176,6 +179,15 @@ static void read_config(void)
   {
     cal_factor = 0;
   }
+
+  for (uint8_t band = 0; band < BAND_COUNT; band++)
+  {
+    output_power[band] = EEPROM.read(EEPROM_OUTPUT_POWER + band);
+    if (output_power[band] == 0xFF)
+    {
+      output_power[band] = OUTPUT_POWER_MAX_DBM;
+    }
+  }
 }
 
 static void write_config(void)
@@ -183,11 +195,16 @@ static void write_config(void)
   DEBUGLN("Writing EEPROM configuration...");
 
   EEPROM.write(EEPROM_MODE, cur_mode);
-  EEPROM.write(EEPROM_FREQUENCY, sel_freq);
+  EEPROM.write(EEPROM_BAND, cur_band);
   EEPROM.write(EEPROM_CAL_FACTOR,     (cal_factor >> 24) & 0xFF);
   EEPROM.write(EEPROM_CAL_FACTOR + 1, (cal_factor >> 16) & 0xFF);
   EEPROM.write(EEPROM_CAL_FACTOR + 2, (cal_factor >>  8) & 0xFF);
   EEPROM.write(EEPROM_CAL_FACTOR + 3, (cal_factor)       & 0xFF);
+
+  for (uint8_t band = 0; band < BAND_COUNT; band++)
+  {
+    EEPROM.write(EEPROM_OUTPUT_POWER + band, output_power[band]);
+  }
 }
 
 static bool is_gps_fixed(void)
@@ -218,30 +235,30 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
 
   // Reset the tone to the base frequency and turn on the output
   si5351.set_clock_pwr(SI5351_CLK0, 1);
-  si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
+  si5351.set_freq(mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT, SI5351_CLK0);
   tx_active = true;
-    
+
   DEBUGLN("Transmitting TX buffer...");
 
-  display_frequency(mode_params[cur_mode].freqs[sel_freq]);
+  display_frequency(mode_params[cur_mode].freqs[cur_band]);
 
-/*
-  // Now transmit the channel symbols
-  if ((cur_mode == MODE_FSQ_2) || (cur_mode == MODE_FSQ_3) || (cur_mode == MODE_FSQ_4_5) || (cur_mode == MODE_FSQ_6))
-  {
-    uint8_t j = 0;
+  /*
+    // Now transmit the channel symbols
+    if ((cur_mode == MODE_FSQ_2) || (cur_mode == MODE_FSQ_3) || (cur_mode == MODE_FSQ_4_5) || (cur_mode == MODE_FSQ_6))
+    {
+      uint8_t j = 0;
 
-    while(tx_buffer[j++] != 0xff);
+      while(tx_buffer[j++] != 0xff);
 
-    mode_params[cur_mode].symbol_count = j - 1;
-  }
-*/
+      mode_params[cur_mode].symbol_count = j - 1;
+    }
+  */
 
   TCA0.SINGLE.CMP0 = mode_params[cur_mode].tone_delay * 25;
 
   for (i = 0; i < mode_params[cur_mode].symbol_count; i++)
   {
-    si5351.set_freq((mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
+    si5351.set_freq((mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
 
     // Wait for timer expire
     TCA0.SINGLE.CNT = 0;
@@ -273,33 +290,33 @@ static void set_tx_buffer(uint8_t *tx_buffer)
   memset(tx_buffer, 0, 255);
 
   // Set the proper frequency and timer CTC depending on mode
-  switch(cur_mode)
+  switch (cur_mode)
   {
-  case MODE_JT9:
-    jtencode.jt9_encode(message, tx_buffer);
-    break;
-  case MODE_JT65:
-    jtencode.jt65_encode(message, tx_buffer);
-    break;
-/*
-  case MODE_JT4:
-    jtencode.jt4_encode(message, tx_buffer);
-    break;
-*/
-  case MODE_WSPR:
-    jtencode.wspr_encode(call, loc, dbm, tx_buffer);
-    break;
-  case MODE_FT8:
-    jtencode.ft8_encode(message, tx_buffer);
-    break;
-/*
-  case MODE_FSQ_2:
-  case MODE_FSQ_3:
-  case MODE_FSQ_4_5:
-  case MODE_FSQ_6:
-    jtencode.fsq_dir_encode(call, "n0call", ' ', "hello world", tx_buffer);
-    break;
-*/
+    case MODE_JT9:
+      jtencode.jt9_encode(message, tx_buffer);
+      break;
+    case MODE_JT65:
+      jtencode.jt65_encode(message, tx_buffer);
+      break;
+    /*
+      case MODE_JT4:
+        jtencode.jt4_encode(message, tx_buffer);
+        break;
+    */
+    case MODE_WSPR:
+      jtencode.wspr_encode(call, loc, output_power[cur_band], tx_buffer);
+      break;
+    case MODE_FT8:
+      jtencode.ft8_encode(message, tx_buffer);
+      break;
+      /*
+        case MODE_FSQ_2:
+        case MODE_FSQ_3:
+        case MODE_FSQ_4_5:
+        case MODE_FSQ_6:
+          jtencode.fsq_dir_encode(call, "n0call", ' ', "hello world", tx_buffer);
+          break;
+      */
   }
 }
 
@@ -412,9 +429,9 @@ static void calibration(cal_refresh_cb cb)
 
   DEBUGLN("Calibration started...");
 
-//  // Let's stabilize GPS 
-//  si5351.set_clock_pwr(SI5351_CLK2, 1);
-//  delay(20000);
+  //  // Let's stabilize GPS
+  //  si5351.set_clock_pwr(SI5351_CLK2, 1);
+  //  delay(20000);
 
   cal_timeout = 0;
   cal_watchdog = 0;
@@ -448,7 +465,7 @@ static void calibration(cal_refresh_cb cb)
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
-//  si5351.set_clock_pwr(SI5351_CLK2, 0);
+  //  si5351.set_clock_pwr(SI5351_CLK2, 0);
 }
 
 static void display_header(const char *text)
@@ -464,13 +481,13 @@ static void display_variable(const uint8_t x, const uint8_t y, const char* text)
   {
     if (blink_toggle == true)
     {
-       ssd1306_negativeMode();
-       blink_toggle = false;
+      ssd1306_negativeMode();
+      blink_toggle = false;
     }
     else
     {
-       ssd1306_positiveMode();
-       blink_toggle = true;
+      ssd1306_positiveMode();
+      blink_toggle = true;
     }
   }
   else
@@ -505,6 +522,14 @@ static void display_frequency(const uint32_t value)
   display_variable(8, 24, text);
 }
 
+static void display_output_power(const uint32_t value)
+{
+  char text[16];
+
+  sprintf(text, "%2u dBm", value);
+  display_variable(40, 24, text);
+}
+
 static uint8_t get_next_screen(void)
 {
   static int32_t old_position = 0;
@@ -518,7 +543,7 @@ static uint8_t get_next_screen(void)
   if (edit_mode == false)
   {
     int32_t new_position = encoder.read();
-  
+
     if (old_position != new_position)
     {
       if (new_position >= (old_position + 4))
@@ -541,7 +566,7 @@ static uint8_t get_next_screen(void)
         old_position = new_position;
         refresh_screen = false;
       }
-    }  
+    }
   }
   else
   {
@@ -554,7 +579,7 @@ static uint8_t get_next_screen(void)
 static int8_t get_new_value(void)
 {
   static int32_t old_position = 0;
-  
+
   if (edit_mode == true)
   {
     if (encoder_button.pressed())
@@ -588,7 +613,7 @@ static int8_t get_new_value(void)
       old_position = encoder.read();
       edit_mode = true;
     }
-  }  
+  }
 
   return 0;
 }
@@ -709,7 +734,7 @@ static void show_status_screen(void)
   {
     ssd1306_clearScreen();
     ssd1306_setFixedFont(ssd1306xled_font6x8);
-    ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);  
+    ssd1306_printFixed(  0, 56, call, STYLE_NORMAL);
     ssd1306_printFixed( 52, 56, mode_params[cur_mode].mode_name, STYLE_NORMAL);
   }
 
@@ -720,7 +745,7 @@ static void show_status_screen(void)
   draw_gps_symbol();
   draw_battery();
 
-  display_frequency(mode_params[cur_mode].freqs[sel_freq]);
+  display_frequency(mode_params[cur_mode].freqs[cur_band]);
 }
 
 static void show_set_mode_screen(void)
@@ -765,19 +790,19 @@ static void show_set_frequency_screen(void)
   {
     if (value > 0)
     {
-      sel_freq++;
-      if (sel_freq == BAND_COUNT)
+      cur_band++;
+      if (cur_band == BAND_COUNT)
       {
-        sel_freq = 0;
+        cur_band = 0;
       }
     }
     else
     {
-      if (sel_freq == 0)
+      if (cur_band == 0)
       {
-        sel_freq = BAND_COUNT;
+        cur_band = BAND_COUNT;
       }
-      sel_freq--;
+      cur_band--;
     }
     refresh_screen = true;
   }
@@ -788,7 +813,39 @@ static void show_set_frequency_screen(void)
     display_header("Frequency");
   }
 
-  display_frequency(mode_params[cur_mode].freqs[sel_freq]);
+  display_frequency(mode_params[cur_mode].freqs[cur_band]);
+}
+
+static void show_set_output_power(void)
+{
+  int8_t value = get_new_value();
+
+  if (value != 0)
+  {
+    if (value > 0)
+    {
+      if (output_power[cur_band] < OUTPUT_POWER_MAX_DBM)
+      {
+        output_power[cur_band]++;
+      }
+    }
+    else
+    {
+      if (output_power[cur_band] > OUTPUT_POWER_MIN_DBM)
+      {
+        output_power[cur_band]--;
+      }
+    }
+    refresh_screen = true;
+  }
+
+  if (refresh_screen == false)
+  {
+    ssd1306_clearScreen();
+    display_header("Output power");
+  }
+
+  display_output_power(output_power[cur_band]);
 }
 
 static void show_gps_status_screen(void)
@@ -868,7 +925,7 @@ static void show_calibration_progress(void)
 static void show_calibration_screen(void)
 {
   get_new_value();
-  
+
   if (refresh_screen == false)
   {
     ssd1306_clearScreen();
@@ -881,7 +938,7 @@ static void show_calibration_screen(void)
   {
     char buf[16];
     sprintf(buf, "Factor:%7ld", cal_factor);
-    ssd1306_printFixed(8,  24, buf, STYLE_NORMAL);  
+    ssd1306_printFixed(8,  24, buf, STYLE_NORMAL);
   }
   else
   {
@@ -917,7 +974,7 @@ static void show_transmitter_screen(void)
     {
       draw_enable_status(true);
       si5351.set_clock_pwr(SI5351_CLK0, 1);
-      si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
+      si5351.set_freq(mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT, SI5351_CLK0);
       tx_active = true;
     }
   }
@@ -962,6 +1019,9 @@ static void show_screen(void)
       case SCREEN_SET_FREQUENCY:
         show_set_frequency_screen();
         break;
+      case SCREEN_SET_OUTPUT_POWER:
+        show_set_output_power();
+        break;
       case SCREEN_GPS_STATUS:
         show_gps_status_screen();
         break;
@@ -977,11 +1037,11 @@ static void show_screen(void)
       default:
         show_status_screen();
         break;
-    }  
+    }
 
     cur_screen = next_screen;
     refresh_screen = false;
-  } 
+  }
 }
 
 void setup()
@@ -1004,15 +1064,15 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
 
   // Set CLK0 output
-  si5351.set_freq(mode_params[cur_mode].freqs[sel_freq] * SI5351_FREQ_MULT, SI5351_CLK0);
+  si5351.set_freq(mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT, SI5351_CLK0);
   si5351.drive_strength(SI5351_CLK0, SI5351_DRIVE_8MA);
   si5351.set_clock_pwr(SI5351_CLK0, 0);
 
   // Set CLK2 output
   si5351.set_ms_source(SI5351_CLK2, SI5351_PLLB);
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
-//  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
-//  si5351.set_clock_pwr(SI5351_CLK2, 0);
+  //  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
+  //  si5351.set_clock_pwr(SI5351_CLK2, 0);
 
   DEBUGLN("Encoder setup...");
   encoder_button.begin();
