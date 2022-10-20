@@ -28,7 +28,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.0.17"
+#define VERSION_STRING   "v1.0.18"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -366,7 +366,7 @@ static void pit_interrupt()
 {
   if (cal_timeout < CAL_TIME_SECONDS)
   {
-    DEBUG("Calibration watchdog: prev/curr=");
+    DEBUG("Cal. watchdog: prev/curr=");
     DEBUG(cal_watchdog_last_timout);
     DEBUG("/");
     DEBUGLN(cal_timeout);
@@ -449,17 +449,20 @@ static void calibration(cal_refresh_cb cb)
 
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
+  int32_t new_cal_factor = cal_factor + (pulse_diff * 10UL);
 
   DEBUG("Measured frequency: ");
   DEBUG((float)(pulse_count / CAL_TIME_SECONDS));
   DEBUGLN("Hz");
-  DEBUG("New calibration factor: ");
+  DEBUG("Pulse difference: ");
   DEBUGLN(pulse_diff);
+  DEBUG("New calibration factor: ");
+  DEBUGLN(new_cal_factor);
 
-  if ((pulse_diff < 1000000) && (pulse_diff > -1000000))
+  if ((new_cal_factor < 1000000) && (new_cal_factor > -1000000))
   {
     cal_factor_valid = true;
-    cal_factor = pulse_diff;
+    cal_factor = new_cal_factor;
     write_config();
   }
 
@@ -1061,6 +1064,7 @@ void setup()
   DEBUGLN("Si5351 setup...");
   pinMode(CAL_SIGNAL_PIN, INPUT);
   si5351.init(SI5351_CRYSTAL_LOAD_10PF, SI5351_XTAL_FREQ, cal_factor);
+  si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
   attachInterrupt(digitalPinToInterrupt(GPS_PPS_PIN), pps_interrupt, RISING);
 
   // Set CLK0 output
