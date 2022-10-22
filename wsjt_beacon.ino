@@ -14,6 +14,7 @@
 #include "priv_types.h"
 
 #define DEBUG_TRACES     1
+// #define DEBUG_GPS_NMEA   1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -28,7 +29,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.0.18"
+#define VERSION_STRING   "v1.0.19"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -84,6 +85,7 @@ bool edit_mode = false;
 bool blink_toggle = false;
 bool tx_active = false;
 volatile int8_t tx_timeout = 0;
+bool gps_enabled = false;
 
 #define CAL_FREQ             (2500000ULL)
 #define CAL_TIME_SECONDS     (40UL)
@@ -207,6 +209,23 @@ static void write_config(void)
   }
 }
 
+static const uint8_t ubxSetPMREQ[16] = { 0xb5, 0x62, 0x02, 0x41, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x4d, 0x3b };
+static const uint8_t ubxVer[6] = { 0xb5, 0x62, 0x0a, 0x04, 0x0e, 0x18 };
+
+static void turn_off_gps(void)
+{
+  Serial1.write(ubxSetPMREQ, sizeof(ubxSetPMREQ));
+  gps_enabled = false;
+  delay(1000);
+}
+
+static void turn_on_gps(void)
+{
+  Serial1.write(ubxVer, sizeof(ubxVer));
+  gps_enabled = true;
+  delay(1000);
+}
+
 static bool is_gps_fixed(void)
 {
   unsigned long age = TinyGPS::GPS_INVALID_FIX_TIME;
@@ -320,23 +339,32 @@ static void set_tx_buffer(uint8_t *tx_buffer)
   }
 }
 
-static void process_sync_message()
+static void process_gps_sync_message()
 {
-  // Process gps messages
-  if (gps.encode(Serial1.read()))
+  if (Serial1.available())
   {
-    // When TinyGPS reports new data...
-    unsigned long age;
-    int Year;
-    byte Month, Day, Hour, Minute, Second;
+    char c = Serial1.read();
 
-    gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, &age);
+#if DEBUG_GPS_NMEA
+    DEBUG(c);
+#endif
 
-    if (age < 500)
+    // Process gps messages
+    if (gps.encode(c))
     {
-      // Set the Time to the latest GPS reading
-      setTime(Hour, Minute, Second, Day, Month, Year);
-      adjustTime((offset + dstOffset(Day, Month, Year, Hour)) * SECS_PER_HOUR);
+      // When TinyGPS reports new data...
+      unsigned long age;
+      int Year;
+      byte Month, Day, Hour, Minute, Second;
+
+      gps.crack_datetime(&Year, &Month, &Day, &Hour, &Minute, &Second, NULL, &age);
+
+      if (age < 500)
+      {
+        // Set the Time to the latest GPS reading
+        setTime(Hour, Minute, Second, Day, Month, Year);
+        adjustTime((offset + dstOffset(Day, Month, Year, Hour)) * SECS_PER_HOUR);
+      }
     }
   }
 }
@@ -429,10 +457,6 @@ static void calibration(cal_refresh_cb cb)
 
   DEBUGLN("Calibration started...");
 
-  //  // Let's stabilize GPS
-  //  si5351.set_clock_pwr(SI5351_CLK2, 1);
-  //  delay(20000);
-
   cal_timeout = 0;
   cal_watchdog = 0;
 
@@ -468,7 +492,12 @@ static void calibration(cal_refresh_cb cb)
 
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
-  //  si5351.set_clock_pwr(SI5351_CLK2, 0);
+
+  if (cal_factor_valid == true)
+  {
+    si5351.set_clock_pwr(SI5351_CLK2, 0);
+    turn_off_gps();
+  }
 }
 
 static void display_header(const char *text)
@@ -529,7 +558,7 @@ static void display_output_power(const uint32_t value)
 {
   char text[16];
 
-  sprintf(text, "%2u dBm", value);
+  sprintf(text, "%2lu dBm", value);
   display_variable(40, 24, text);
 }
 
@@ -623,6 +652,12 @@ static int8_t get_new_value(void)
 
 static void draw_gps_symbol(void)
 {
+  if (gps_enabled == false)
+  {
+    ssd1306_clearBlock(0, 0, 8, 8);
+    return;
+  }
+
   if (is_gps_fixed())
   {
     ssd1306_drawBuffer(0, 0, 8, 8, gps_icon);
@@ -925,6 +960,28 @@ static void show_calibration_progress(void)
   }
 }
 
+static void show_gps_acquisition_progress(void)
+{
+  static uint8_t counter = 0;
+
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+  ssd1306_printFixed(8, 24, "Waiting GPS", STYLE_NORMAL);
+
+  switch (counter)
+  {
+    case 1:  ssd1306_printFixed(96, 24, ".   ", STYLE_NORMAL); break;
+    case 2:  ssd1306_printFixed(96, 24, "..  ", STYLE_NORMAL); break;
+    case 3:  ssd1306_printFixed(96, 24, "... ", STYLE_NORMAL); break;
+    default: ssd1306_printFixed(96, 24, "    ", STYLE_NORMAL); break;
+  }
+
+  counter++;
+  if (counter > 3)
+  {
+    counter = 0;
+  }
+}
+
 static void show_calibration_screen(void)
 {
   get_new_value();
@@ -945,6 +1002,22 @@ static void show_calibration_screen(void)
   }
   else
   {
+    uint32_t last_update = millis();
+
+    si5351.set_clock_pwr(SI5351_CLK2, 1);
+    turn_on_gps();
+
+    while (is_gps_fixed() == false)
+    {
+      process_gps_sync_message();
+
+      if ((millis() - last_update) > DISPLAY_REFRESH_TIME)
+      {
+        show_gps_acquisition_progress();
+        last_update = millis();
+      }
+    }
+
     calibration(show_calibration_progress);
     edit_mode = false;
   }
@@ -1056,9 +1129,11 @@ void setup()
   DEBUGLN("NEO-6M setup...");
   Serial1.begin(9600);
   pinMode(GPS_PPS_PIN, INPUT);
+  turn_on_gps();
 
   DEBUGLN("SSD1306 setup...");
   ssd1306_128x64_i2c_init();
+  // ssd1306_setContrast(0x01);
   ssd1306_clearScreen();
 
   DEBUGLN("Si5351 setup...");
@@ -1076,7 +1151,6 @@ void setup()
   si5351.set_ms_source(SI5351_CLK2, SI5351_PLLB);
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
   //  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
-  //  si5351.set_clock_pwr(SI5351_CLK2, 0);
 
   DEBUGLN("Encoder setup...");
   encoder_button.begin();
@@ -1099,10 +1173,7 @@ void loop()
   static timeStatus_t last_time_status = timeNotSet;
   timeStatus_t time_status = timeStatus();
 
-  if (Serial1.available())
-  {
-    process_sync_message();
-  }
+  process_gps_sync_message();
 
   if (time_status != last_time_status)
   {
@@ -1151,6 +1222,17 @@ void loop()
         }
         break;
 
+      case 13:
+      case 43:
+        {
+          if (second() == 0)
+          {
+            si5351.set_clock_pwr(SI5351_CLK2, 1);
+            turn_on_gps();
+          }
+        }
+        break;
+
       case 15:
       case 45:
         {
@@ -1160,6 +1242,11 @@ void loop()
             {
               force_switch_to_status_screen();
               calibration(show_calbration_status);
+            }
+            else
+            {
+              si5351.set_clock_pwr(SI5351_CLK2, 0);
+              turn_off_gps();
             }
           }
         }
