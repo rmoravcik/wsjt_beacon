@@ -14,7 +14,7 @@
 #include "priv_types.h"
 
 #define DEBUG_TRACES     1
-// #define DEBUG_GPS_NMEA   1
+#define DEBUG_GPS_NMEA   1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -214,13 +214,18 @@ static const uint8_t ubxVer[6] = { 0xb5, 0x62, 0x0a, 0x04, 0x0e, 0x18 };
 
 static void turn_off_gps(void)
 {
-  Serial1.write(ubxSetPMREQ, sizeof(ubxSetPMREQ));
-  gps_enabled = false;
-  delay(1000);
+  if (gps_enabled == true)
+  {
+    DEBUGLN("Disabling GPS...");
+    Serial1.write(ubxSetPMREQ, sizeof(ubxSetPMREQ));
+    gps_enabled = false;
+    delay(1000);
+  }
 }
 
 static void turn_on_gps(void)
 {
+  DEBUGLN("Enabling GPS...");
   Serial1.write(ubxVer, sizeof(ubxVer));
   gps_enabled = true;
   delay(1000);
@@ -1129,7 +1134,6 @@ void setup()
   DEBUGLN("NEO-6M setup...");
   Serial1.begin(9600);
   pinMode(GPS_PPS_PIN, INPUT);
-  turn_on_gps();
 
   DEBUGLN("SSD1306 setup...");
   ssd1306_128x64_i2c_init();
@@ -1163,6 +1167,8 @@ void setup()
   DEBUGLN("ADC setup...");
   analogReference(INTERNAL1V1);
   pinMode(BATTERY_PIN, INPUT);
+
+  turn_on_gps();
 
   DEBUGLN("Done...");
 }
