@@ -745,8 +745,12 @@ static void draw_clock(void)
   {
     char buf[6];
 
-    ssd1306_setFixedFont(ssd1306xled_font6x8);
     sprintf(buf, "%02u:%02u", hour(), cur_minute);
+
+    DEBUG("Time: ");
+    DEBUGLN(buf);
+
+    ssd1306_setFixedFont(ssd1306xled_font6x8);
     ssd1306_printFixed( 48,  0,  buf, STYLE_NORMAL);
   }
 }
