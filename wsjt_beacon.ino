@@ -159,7 +159,7 @@ void calc_grid_square(float lat, float lon)
 
 static void read_config(void)
 {
-  DEBUGLN("Reading EEPROM configuration...");
+  DEBUGLN("Reading EEPROM config");
 
   cur_mode = EEPROM.read(EEPROM_MODE);
   if (cur_mode > MODE_COUNT)
@@ -194,7 +194,7 @@ static void read_config(void)
 
 static void write_config(void)
 {
-  DEBUGLN("Writing EEPROM configuration...");
+  DEBUGLN("Writing EEPROM config");
 
   EEPROM.write(EEPROM_MODE, cur_mode);
   EEPROM.write(EEPROM_BAND, cur_band);
@@ -216,7 +216,7 @@ static void turn_off_gps(void)
 {
   if (gps_enabled == true)
   {
-    DEBUGLN("Disabling GPS...");
+    DEBUGLN("Disabling GPS");
     Serial1.write(ubxSetPMREQ, sizeof(ubxSetPMREQ));
     gps_enabled = false;
     delay(1000);
@@ -225,7 +225,7 @@ static void turn_off_gps(void)
 
 static void turn_on_gps(void)
 {
-  DEBUGLN("Enabling GPS...");
+  DEBUGLN("Enabling GPS");
   Serial1.write(ubxVer, sizeof(ubxVer));
   gps_enabled = true;
   delay(1000);
@@ -262,7 +262,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   si5351.set_freq(mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT, SI5351_CLK0);
   tx_active = true;
 
-  DEBUGLN("Transmitting TX buffer...");
+  DEBUGLN("Transmitting TX buffer");
 
   display_frequency(mode_params[cur_mode].freqs[cur_band]);
 
@@ -299,14 +299,14 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   si5351.set_clock_pwr(SI5351_CLK0, 0);
   tx_active = false;
 
-  DEBUGLN("Transmition finished...");
+  DEBUGLN("Transmition finished");
 }
 
 static void set_tx_buffer(uint8_t *tx_buffer)
 {
   char message[14];
 
-  DEBUGLN("Setting TX buffer...");
+  DEBUGLN("Setting TX buffer");
 
   sprintf(message, "%s %s", call, loc);
 
@@ -416,7 +416,7 @@ static void pit_interrupt()
     if (cal_watchdog >= 3)
     {
       // Timeout
-      DEBUGLN("GPS lost during calibration!");
+      DEBUGLN("Lost GPS!");
       cal_timeout = CAL_TIMEOUT_SECONDS;
       init_tca0(false);
     }
@@ -483,8 +483,6 @@ static void calibration(cal_refresh_cb cb)
   DEBUG("Measured frequency: ");
   DEBUG((float)(pulse_count / CAL_TIME_SECONDS));
   DEBUGLN("Hz");
-  DEBUG("Pulse difference: ");
-  DEBUGLN(pulse_diff);
   DEBUG("New calibration factor: ");
   DEBUGLN(new_cal_factor);
 
@@ -1135,16 +1133,17 @@ void setup()
 
   read_config();
 
-  DEBUGLN("NEO-6M setup...");
+  DEBUGLN("Setup:");
+  DEBUGLN("- NEO-6M");
   Serial1.begin(9600);
   pinMode(GPS_PPS_PIN, INPUT);
 
-  DEBUGLN("SSD1306 setup...");
+  DEBUGLN("- SSD1306");
   ssd1306_128x64_i2c_init();
   // ssd1306_setContrast(0x01);
   ssd1306_clearScreen();
 
-  DEBUGLN("Si5351 setup...");
+  DEBUGLN("- SI5351");
   pinMode(CAL_SIGNAL_PIN, INPUT);
   si5351.init(SI5351_CRYSTAL_LOAD_10PF, SI5351_XTAL_FREQ, cal_factor);
   si5351.set_correction(cal_factor, SI5351_PLL_INPUT_XO);
@@ -1160,21 +1159,21 @@ void setup()
   si5351.set_freq(CAL_FREQ * SI5351_FREQ_MULT, SI5351_CLK2);
   //  si5351.drive_strength(SI5351_CLK2, SI5351_DRIVE_8MA);
 
-  DEBUGLN("Encoder setup...");
+  DEBUGLN("- Encoder");
   encoder_button.begin();
 
-  DEBUGLN("Initialize timer...");
+  DEBUGLN("- Timer");
   init_evsys();
   init_tca0(false);
   InternalRTC.attachInterrupt(pit_interrupt);
 
-  DEBUGLN("ADC setup...");
+  DEBUGLN("- ADC");
   analogReference(INTERNAL1V1);
   pinMode(BATTERY_PIN, INPUT);
 
   turn_on_gps();
 
-  DEBUGLN("Done...");
+  DEBUGLN("Done");
 }
 
 void loop()
