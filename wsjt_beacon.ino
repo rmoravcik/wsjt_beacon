@@ -29,7 +29,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.0.19"
+#define VERSION_STRING   "v1.1.0"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -400,6 +400,18 @@ static void init_tca0(const bool cal_mode)
   }
 }
 
+static void init_pit(void)
+{
+  // Internal 32.768 kHz from OSCULP32K
+  RTC.CLKSEL = RTC_CLKSEL_INT32K_gc;
+
+  // Periodic Interrupt: enabled
+  RTC.PITINTCTRL = RTC_PI_bm;
+
+  // set pit period off at startup
+  RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc | RTC_PITEN_bm;
+}
+
 ISR(RTC_PIT_vect)
 {
   if (cal_timeout < CAL_TIME_SECONDS)
@@ -752,7 +764,6 @@ static void draw_clock(void)
   {
     char buf[6];
 
-    
     sprintf(buf, "%02u:%02u", cur_hour, cur_minute);
 
     DEBUG("Time: ");
@@ -1173,9 +1184,12 @@ void setup()
   encoder_button.begin();
 
   DEBUGLN("- Timer");
+  init_pit();
   init_evsys();
   init_tca0(false);
-  // InternalRTC.attachInterrupt(pit_interrupt);
+
+  DEBUGLN("- DS3231");
+  ds3231.setClockMode(false);
 
   DEBUGLN("- ADC");
   analogReference(INTERNAL1V1);
@@ -1189,40 +1203,23 @@ void setup()
 void loop()
 {
   static uint32_t last_update = 0;
-//  static timeStatus_t last_time_status = timeNotSet;
-//  timeStatus_t time_status = timeStatus();
 
   process_gps_sync_message();
 
-//  if (time_status != last_time_status)
+  if (is_gps_fixed() && (cal_factor_valid == false))
   {
-//    switch (time_status)
-    {
-//      case timeSet:
-        {
-          float lat, lon;
+    float lat, lon;
 
-          gps.f_get_position(&lat, &lon);
-          calc_grid_square(lat, lon);
+    gps.f_get_position(&lat, &lon);
+    calc_grid_square(lat, lon);
 
-          set_tx_buffer(tx_buffer);
+    set_tx_buffer(tx_buffer);
 
-          if (cal_factor_valid == false)
-          {
-            force_switch_to_status_screen();
-            calibration(show_calbration_status);
-          }
-        }
-//        break;
-
-//      default:
-  //      break;
-    }
-
-//    last_time_status = time_status;
+    force_switch_to_status_screen();
+    calibration(show_calbration_status);
   }
 
-//  if (time_status != timeNotSet)
+  if (cal_factor_valid)
   {
     switch (ds3231.getMinute())
     {
