@@ -3,7 +3,7 @@
 #include "src/Si5351Arduino/src/si5351.h"
 #include <JTEncode.h>
 #include <int.h>
-#include "src/Time/TimeLib.h"
+#include <DS3231.h>
 #include <TinyGPS.h>
 #include <Encoder.h>
 #include <ssd1306.h>
@@ -67,6 +67,7 @@ const struct mode_param mode_params[MODE_COUNT] {
 Si5351 si5351;
 JTEncode jtencode;
 TinyGPS gps;
+DS3231 ds3231;
 Encoder encoder(ENC_A_PIN, ENC_B_PIN);
 Button encoder_button(ENC_BUTTON_PIN);
 
@@ -367,8 +368,12 @@ static void process_gps_sync_message()
       if (age < 500)
       {
         // Set the Time to the latest GPS reading
-        setTime(Hour, Minute, Second, Day, Month, Year);
-        adjustTime((offset + dstOffset(Day, Month, Year, Hour)) * SECS_PER_HOUR);
+        ds3231.setSecond(Second);
+        ds3231.setMinute(Minute);
+        ds3231.setHour(Hour + offset + dstOffset(Day, Month, Year, Hour));
+        ds3231.setDate(Day);
+        ds3231.setMonth(Month);
+        ds3231.setYear(Year);
       }
     }
   }
@@ -395,11 +400,11 @@ static void init_tca0(const bool cal_mode)
   }
 }
 
-static void pit_interrupt()
+ISR(RTC_PIT_vect)
 {
   if (cal_timeout < CAL_TIME_SECONDS)
   {
-    DEBUG("Cal. watchdog: prev/curr=");
+    DEBUG("Cal. watchdog: prev/cur=");
     DEBUG(cal_watchdog_last_timout);
     DEBUG("/");
     DEBUGLN(cal_timeout);
@@ -423,6 +428,8 @@ static void pit_interrupt()
 
     cal_watchdog_last_timout = cal_timeout;
   }
+
+  RTC.PITINTFLAGS = RTC_PI_bm;
 }
 
 static void pps_interrupt()
@@ -460,7 +467,7 @@ static void calibration(cal_refresh_cb cb)
   uint8_t prev_cal_timeout = CAL_TIMEOUT_SECONDS;
   cal_watchdog_last_timout = CAL_TIMEOUT_SECONDS;
 
-  DEBUGLN("Calibration started...");
+  DEBUGLN("Cal. started");
 
   cal_timeout = 0;
   cal_watchdog = 0;
@@ -480,10 +487,10 @@ static void calibration(cal_refresh_cb cb)
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
   int32_t new_cal_factor = cal_factor + (pulse_diff * 10UL);
 
-  DEBUG("Measured frequency: ");
+  DEBUG("Cal. freq.: ");
   DEBUG((float)(pulse_count / CAL_TIME_SECONDS));
   DEBUGLN("Hz");
-  DEBUG("New calibration factor: ");
+  DEBUG("Cal. factor: ");
   DEBUGLN(new_cal_factor);
 
   if ((new_cal_factor < 1000000) && (new_cal_factor > -1000000))
@@ -723,7 +730,9 @@ static void draw_battery(void)
 static void draw_clock(void)
 {
   static uint8_t last_minute = 0xFF;
-  uint8_t cur_minute = minute();
+  bool h12 = false, PM_time = false;
+  uint8_t cur_minute = ds3231.getMinute();
+  uint8_t cur_hour = ds3231.getHour(h12, PM_time);
   bool draw = false;
 
   if (refresh_screen == false)
@@ -743,7 +752,8 @@ static void draw_clock(void)
   {
     char buf[6];
 
-    sprintf(buf, "%02u:%02u", hour(), cur_minute);
+    
+    sprintf(buf, "%02u:%02u", cur_hour, cur_minute);
 
     DEBUG("Time: ");
     DEBUGLN(buf);
@@ -1165,7 +1175,7 @@ void setup()
   DEBUGLN("- Timer");
   init_evsys();
   init_tca0(false);
-  InternalRTC.attachInterrupt(pit_interrupt);
+  // InternalRTC.attachInterrupt(pit_interrupt);
 
   DEBUGLN("- ADC");
   analogReference(INTERNAL1V1);
@@ -1179,16 +1189,16 @@ void setup()
 void loop()
 {
   static uint32_t last_update = 0;
-  static timeStatus_t last_time_status = timeNotSet;
-  timeStatus_t time_status = timeStatus();
+//  static timeStatus_t last_time_status = timeNotSet;
+//  timeStatus_t time_status = timeStatus();
 
   process_gps_sync_message();
 
-  if (time_status != last_time_status)
+//  if (time_status != last_time_status)
   {
-    switch (time_status)
+//    switch (time_status)
     {
-      case timeSet:
+//      case timeSet:
         {
           float lat, lon;
 
@@ -1203,18 +1213,18 @@ void loop()
             calibration(show_calbration_status);
           }
         }
-        break;
+//        break;
 
-      default:
-        break;
+//      default:
+  //      break;
     }
 
-    last_time_status = time_status;
+//    last_time_status = time_status;
   }
 
-  if (time_status != timeNotSet)
+//  if (time_status != timeNotSet)
   {
-    switch (minute())
+    switch (ds3231.getMinute())
     {
       case  0:
       case 10:
@@ -1223,7 +1233,7 @@ void loop()
       case 40:
       case 50:
         {
-          if (second() == mode_params[cur_mode].start_time)
+          if (ds3231.getSecond() == mode_params[cur_mode].start_time)
           {
             force_switch_to_status_screen();
             encode(tx_buffer, show_transmit_status);
@@ -1234,7 +1244,7 @@ void loop()
       case 13:
       case 43:
         {
-          if (second() == 0)
+          if (ds3231.getSecond() == 0)
           {
             si5351.set_clock_pwr(SI5351_CLK2, 1);
             turn_on_gps();
@@ -1245,7 +1255,7 @@ void loop()
       case 15:
       case 45:
         {
-          if (second() == 0)
+          if (ds3231.getSecond() == 0)
           {
             if (is_gps_fixed())
             {
@@ -1273,4 +1283,6 @@ void loop()
     refresh_screen = true;
     last_update = millis();
   }
+
+  delay(100);
 }
