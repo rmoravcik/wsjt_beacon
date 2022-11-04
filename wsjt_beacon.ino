@@ -14,7 +14,7 @@
 #include "priv_types.h"
 
 #define DEBUG_TRACES     1
-#define DEBUG_GPS_NMEA   1
+// #define DEBUG_GPS_NMEA   1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -87,13 +87,19 @@ bool tx_active = false;
 volatile int8_t tx_timeout = 0;
 bool gps_enabled = false;
 
+#define RTC_CAL_FREQ             (512ULL)
+#define RTC_CAL_TIME_SECONDS     (120UL)
+#define RTC_CAL_TIMEOUT_SECONDS  (RTC_CAL_TIME_SECONDS + 1)
+volatile uint8_t rtc_cal_timeout = RTC_CAL_TIMEOUT_SECONDS;
+volatile bool is_rtc_calibration = false;
+
 #define CAL_FREQ             (2500000ULL)
 #define CAL_TIME_SECONDS     (40UL)
 #define CAL_TIMEOUT_SECONDS  (CAL_TIME_SECONDS + 1)
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
 volatile uint8_t cal_timeout = CAL_TIMEOUT_SECONDS;
-volatile uint8_t cal_watchdog_last_timout = 0;
+volatile uint8_t cal_watchdog_last_value = 0;
 volatile uint8_t cal_watchdog = 0;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
@@ -397,14 +403,23 @@ static void init_tca0(const bool cal_mode)
 
 static void pit_interrupt()
 {
-  if (cal_timeout < CAL_TIME_SECONDS)
-  {
-    DEBUG("Cal. watchdog: prev/curr=");
-    DEBUG(cal_watchdog_last_timout);
-    DEBUG("/");
-    DEBUGLN(cal_timeout);
+  uint8_t max_timeout_value = CAL_TIMEOUT_SECONDS;
+  uint8_t cur_value = cal_timeout;
 
-    if (cal_watchdog_last_timout == cal_timeout)
+  if (is_rtc_calibration == true)
+  {
+    max_timeout_value = RTC_CAL_TIMEOUT_SECONDS;
+    cur_value = rtc_cal_timeout;
+  }
+
+  if (cur_value < max_timeout_value)
+  {
+    DEBUG("Cal. watchdog: prev/cur=");
+    DEBUG(cal_watchdog_last_value);
+    DEBUG("/");
+    DEBUGLN(cur_value);
+
+    if (cal_watchdog_last_value == cur_value)
     {
       cal_watchdog++;
     }
@@ -417,29 +432,50 @@ static void pit_interrupt()
     {
       // Timeout
       DEBUGLN("Lost GPS!");
-      cal_timeout = CAL_TIMEOUT_SECONDS;
+      if (is_rtc_calibration == true)
+      {
+        rtc_cal_timeout = max_timeout_value + 1;
+      }
+      else
+      {
+        cal_timeout = max_timeout_value + 1;
+      }
       init_tca0(false);
     }
 
-    cal_watchdog_last_timout = cal_timeout;
+    cal_watchdog_last_value = cur_value;
   }
 }
 
 static void pps_interrupt()
 {
-  if (cal_timeout == 0)
-  {
-    init_tca0(true);
-    timer0_ovf_counter = 0;
-  }
-  else if (cal_timeout == CAL_TIME_SECONDS)
-  {
-    timer0_count = TCA0.SINGLE.CNT;
-    init_tca0(false);
-  }
   if (cal_timeout < CAL_TIMEOUT_SECONDS)
   {
+    if (cal_timeout == 0)
+    {
+      init_tca0(true);
+      timer0_ovf_counter = 0;
+    }
+    else if (cal_timeout == CAL_TIME_SECONDS)
+    {
+      timer0_count = TCA0.SINGLE.CNT;
+      init_tca0(false);
+    }
     cal_timeout++;
+  }
+  else if (rtc_cal_timeout < RTC_CAL_TIMEOUT_SECONDS)
+  {
+    if (rtc_cal_timeout == 0)
+    {
+      init_tca0(true);
+      timer0_ovf_counter = 0;
+    }
+    else if (rtc_cal_timeout == RTC_CAL_TIME_SECONDS)
+    {
+      timer0_count = TCA0.SINGLE.CNT;
+      init_tca0(false);
+    }
+    rtc_cal_timeout++;
   }
 }
 
@@ -452,15 +488,53 @@ ISR(TCA0_OVF_vect)
 static void init_evsys(void)
 {
   EVSYS.CHANNEL4 = EVSYS_GENERATOR_PORT1_PIN4_gc;
+  EVSYS.CHANNEL7 = EVSYS_GENERATOR_RTC_PIT3_gc;
   EVSYS.USERTCA0 = EVSYS_CHANNEL_CHANNEL4_gc;
+}
+
+static void rtc_calibration(cal_refresh_cb cb)
+{
+  uint8_t prev_rtc_cal_timeout = RTC_CAL_TIMEOUT_SECONDS;
+  cal_watchdog_last_value = RTC_CAL_TIMEOUT_SECONDS;
+
+  DEBUGLN("RTC Cal. started");
+  is_rtc_calibration = true;
+
+  EVSYS.USERTCA0 = EVSYS_CHANNEL_CHANNEL7_gc;
+
+  rtc_cal_timeout = 0;
+  cal_watchdog = 0;
+
+  do {
+    if (prev_rtc_cal_timeout != rtc_cal_timeout)
+    {
+      if (cb != NULL)
+      {
+        (*cb)();
+      }
+    }
+    prev_rtc_cal_timeout = rtc_cal_timeout;
+  } while (rtc_cal_timeout < RTC_CAL_TIMEOUT_SECONDS);
+
+  uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
+  uint16_t rtc_freq = (float) pulse_count * 64.0f / 120.0f;
+
+  DEBUG("RTC freq.: ");
+  DEBUG(rtc_freq);
+  DEBUGLN("Hz");
+
+  RTC.PER = rtc_freq;
 }
 
 static void calibration(cal_refresh_cb cb)
 {
   uint8_t prev_cal_timeout = CAL_TIMEOUT_SECONDS;
-  cal_watchdog_last_timout = CAL_TIMEOUT_SECONDS;
+  cal_watchdog_last_value = CAL_TIMEOUT_SECONDS;
 
-  DEBUGLN("Calibration started...");
+  DEBUGLN("Cal. started");
+  is_rtc_calibration = false;
+
+  EVSYS.USERTCA0 = EVSYS_CHANNEL_CHANNEL4_gc;
 
   cal_timeout = 0;
   cal_watchdog = 0;
@@ -480,10 +554,10 @@ static void calibration(cal_refresh_cb cb)
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
   int32_t new_cal_factor = cal_factor + (pulse_diff * 10UL);
 
-  DEBUG("Measured frequency: ");
+  DEBUG("Cal. freq.: ");
   DEBUG((float)(pulse_count / CAL_TIME_SECONDS));
   DEBUGLN("Hz");
-  DEBUG("New calibration factor: ");
+  DEBUG("Cal. factor: ");
   DEBUGLN(new_cal_factor);
 
   if ((new_cal_factor < 1000000) && (new_cal_factor > -1000000))
@@ -941,7 +1015,14 @@ static void show_calbration_status(void)
 
   ssd1306_negativeMode();
   ssd1306_setFixedFont(ssd1306xled_font8x16);
-  ssd1306_printFixed(8, 24, "C", STYLE_NORMAL);
+  if (is_rtc_calibration == true)
+  {
+    ssd1306_printFixed(8, 24, "R", STYLE_NORMAL);
+  }
+  else
+  {
+    ssd1306_printFixed(8, 24, "C", STYLE_NORMAL);
+  }
   ssd1306_positiveMode();
 }
 
@@ -1200,6 +1281,7 @@ void loop()
           if (cal_factor_valid == false)
           {
             force_switch_to_status_screen();
+            rtc_calibration(show_calbration_status);
             calibration(show_calbration_status);
           }
         }
