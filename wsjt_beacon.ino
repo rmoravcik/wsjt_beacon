@@ -14,7 +14,7 @@
 #include "priv_types.h"
 
 #define DEBUG_TRACES     1
-#define DEBUG_GPS_NMEA   1
+// #define DEBUG_GPS_NMEA   1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -29,7 +29,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.1.0"
+#define VERSION_STRING   "v1.1.1"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -70,17 +70,16 @@ TinyGPS gps;
 DS3231 ds3231;
 Encoder encoder(ENC_A_PIN, ENC_B_PIN);
 Button encoder_button(ENC_BUTTON_PIN);
-
-char loc[5] = "AA00";
+char loc[5] = "UNKN";
 
 uint8_t cur_band = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
 uint8_t output_power[BAND_COUNT] = { OUTPUT_POWER_MAX_DBM };
 
-#define DISPLAY_REFRESH_TIME (1000)
+#define TX_CHECK_TIME         (100)
 static uint8_t tx_buffer[255];
 uint8_t cur_screen = SCREEN_COUNT;
-bool refresh_screen = false;
+volatile bool refresh_screen = false;
 
 bool edit_mode = false;
 bool blink_toggle = false;
@@ -93,8 +92,8 @@ bool gps_enabled = false;
 #define CAL_TIMEOUT_SECONDS  (CAL_TIME_SECONDS + 1)
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
-volatile uint8_t cal_timeout = CAL_TIMEOUT_SECONDS;
-volatile uint8_t cal_watchdog_last_timout = 0;
+volatile uint8_t cal_counter = CAL_TIMEOUT_SECONDS;
+volatile uint8_t cal_watchdog_last_counter = 0;
 volatile uint8_t cal_watchdog = 0;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
@@ -160,7 +159,7 @@ void calc_grid_square(float lat, float lon)
 
 static void read_config(void)
 {
-  DEBUGLN("Reading EEPROM config");
+  DEBUGLN("Reading config");
 
   cur_mode = EEPROM.read(EEPROM_MODE);
   if (cur_mode > MODE_COUNT)
@@ -195,7 +194,7 @@ static void read_config(void)
 
 static void write_config(void)
 {
-  DEBUGLN("Writing EEPROM config");
+  DEBUGLN("Writing config");
 
   EEPROM.write(EEPROM_MODE, cur_mode);
   EEPROM.write(EEPROM_BAND, cur_band);
@@ -226,10 +225,13 @@ static void turn_off_gps(void)
 
 static void turn_on_gps(void)
 {
-  DEBUGLN("Enabling GPS");
-  Serial1.write(ubxVer, sizeof(ubxVer));
-  gps_enabled = true;
-  delay(1000);
+  if (gps_enabled == false)
+  {
+    DEBUGLN("Enabling GPS");
+    Serial1.write(ubxVer, sizeof(ubxVer));
+    gps_enabled = true;
+    delay(1000);
+  }
 }
 
 static bool is_gps_fixed(void)
@@ -263,7 +265,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   si5351.set_freq(mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT, SI5351_CLK0);
   tx_active = true;
 
-  DEBUGLN("Transmitting TX buffer");
+  DEBUGLN("Starting TX");
 
   display_frequency(mode_params[cur_mode].freqs[cur_band]);
 
@@ -300,7 +302,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   si5351.set_clock_pwr(SI5351_CLK0, 0);
   tx_active = false;
 
-  DEBUGLN("Transmition finished");
+  DEBUGLN("TX finished");
 }
 
 static void set_tx_buffer(uint8_t *tx_buffer)
@@ -414,14 +416,14 @@ static void init_pit(void)
 
 ISR(RTC_PIT_vect)
 {
-  if (cal_timeout < CAL_TIME_SECONDS)
+  if (cal_counter < CAL_TIME_SECONDS)
   {
     DEBUG("Cal. watchdog: prev/cur=");
-    DEBUG(cal_watchdog_last_timout);
+    DEBUG(cal_watchdog_last_counter);
     DEBUG("/");
-    DEBUGLN(cal_timeout);
+    DEBUGLN(cal_counter);
 
-    if (cal_watchdog_last_timout == cal_timeout)
+    if (cal_watchdog_last_counter == cal_counter)
     {
       cal_watchdog++;
     }
@@ -434,31 +436,32 @@ ISR(RTC_PIT_vect)
     {
       // Timeout
       DEBUGLN("Lost GPS!");
-      cal_timeout = CAL_TIMEOUT_SECONDS;
+      cal_counter = CAL_TIMEOUT_SECONDS;
       init_tca0(false);
     }
 
-    cal_watchdog_last_timout = cal_timeout;
+    cal_watchdog_last_counter = cal_counter;
   }
 
+  refresh_screen = true;
   RTC.PITINTFLAGS = RTC_PI_bm;
 }
 
 static void pps_interrupt()
 {
-  if (cal_timeout == 0)
+  if (cal_counter == 0)
   {
     init_tca0(true);
     timer0_ovf_counter = 0;
   }
-  else if (cal_timeout == CAL_TIME_SECONDS)
+  else if (cal_counter == CAL_TIME_SECONDS)
   {
     timer0_count = TCA0.SINGLE.CNT;
     init_tca0(false);
   }
-  if (cal_timeout < CAL_TIMEOUT_SECONDS)
+  if (cal_counter < CAL_TIMEOUT_SECONDS)
   {
-    cal_timeout++;
+    cal_counter++;
   }
 }
 
@@ -476,24 +479,24 @@ static void init_evsys(void)
 
 static void calibration(cal_refresh_cb cb)
 {
-  uint8_t prev_cal_timeout = CAL_TIMEOUT_SECONDS;
-  cal_watchdog_last_timout = CAL_TIMEOUT_SECONDS;
+  uint8_t prev_cal_counter = CAL_TIMEOUT_SECONDS;
+  cal_watchdog_last_counter = CAL_TIMEOUT_SECONDS;
 
   DEBUGLN("Cal. started");
 
-  cal_timeout = 0;
+  cal_counter = 0;
   cal_watchdog = 0;
 
   do {
-    if (prev_cal_timeout != cal_timeout)
+    if (prev_cal_counter != cal_counter)
     {
       if (cb != NULL)
       {
         (*cb)();
       }
     }
-    prev_cal_timeout = cal_timeout;
-  } while (cal_timeout < CAL_TIMEOUT_SECONDS);
+    prev_cal_counter = cal_counter;
+  } while (cal_counter < CAL_TIMEOUT_SECONDS);
 
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
@@ -764,7 +767,14 @@ static void draw_clock(void)
   {
     char buf[6];
 
-    sprintf(buf, "%02u:%02u", cur_hour, cur_minute);
+    if ((cur_hour > 24) || (cur_minute > 59))
+    {
+      sprintf(buf, "--:--");
+    }
+    else
+    {
+      sprintf(buf, "%02u:%02u", cur_hour, cur_minute);      
+    }
 
     DEBUG("Time: ");
     DEBUGLN(buf);
@@ -1030,8 +1040,6 @@ static void show_calibration_screen(void)
   }
   else
   {
-    uint32_t last_update = millis();
-
     si5351.set_clock_pwr(SI5351_CLK2, 1);
     turn_on_gps();
 
@@ -1039,10 +1047,10 @@ static void show_calibration_screen(void)
     {
       process_gps_sync_message();
 
-      if ((millis() - last_update) > DISPLAY_REFRESH_TIME)
+      if (refresh_screen == true)
       {
         show_gps_acquisition_progress();
-        last_update = millis();
+        refresh_screen = false;
       }
     }
 
@@ -1219,7 +1227,7 @@ void loop()
     calibration(show_calbration_status);
   }
 
-  if (cal_factor_valid)
+  if ((cal_factor_valid) && ((millis() - last_update) > TX_CHECK_TIME))
   {
     switch (ds3231.getMinute())
     {
@@ -1271,15 +1279,9 @@ void loop()
       default:
         break;
     }
-  }
 
-  show_screen();
-
-  if ((millis() - last_update) > DISPLAY_REFRESH_TIME)
-  {
-    refresh_screen = true;
     last_update = millis();
   }
 
-  delay(100);
+  show_screen();
 }
