@@ -29,7 +29,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.1.1"
+#define VERSION_STRING   "v1.1.2"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -414,6 +414,16 @@ static void init_pit(void)
   RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc | RTC_PITEN_bm;
 }
 
+static void disable_pit_irq(void)
+{
+  RTC.PITINTCTRL = 0;
+}
+
+static void enable_pit_irq(void)
+{
+  RTC.PITINTCTRL = RTC_PI_bm;
+}
+
 ISR(RTC_PIT_vect)
 {
   if (cal_counter < CAL_TIME_SECONDS)
@@ -444,6 +454,7 @@ ISR(RTC_PIT_vect)
   }
 
   refresh_screen = true;
+
   RTC.PITINTFLAGS = RTC_PI_bm;
 }
 
@@ -594,6 +605,7 @@ static uint8_t get_next_screen(void)
 
   if (next_screen == SCREEN_COUNT)
   {
+    refresh_screen = false;
     return SCREEN_STATUS;
   }
 
@@ -701,7 +713,7 @@ static void draw_gps_symbol(void)
   }
 }
 
-static void draw_battery(void)
+static void draw_battery(bool force_update)
 {
   static uint8_t last_bars = 0xFF;
   uint8_t cur_bars = 0;
@@ -729,7 +741,7 @@ static void draw_battery(void)
     cur_bars = 0;
   }
 
-  if ((last_bars != cur_bars) || (refresh_screen == false))
+  if ((last_bars != cur_bars) || (force_update))
   {
     ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
@@ -742,28 +754,20 @@ static void draw_battery(void)
   }
 }
 
-static void draw_clock(void)
+static void draw_clock(bool force_update)
 {
   static uint8_t last_minute = 0xFF;
   bool h12 = false, PM_time = false;
   uint8_t cur_minute = ds3231.getMinute();
   uint8_t cur_hour = ds3231.getHour(h12, PM_time);
-  bool draw = false;
 
-  if (refresh_screen == false)
+  if (last_minute != cur_minute)
   {
-    draw = true;
-  }
-  else
-  {
-    if (last_minute != cur_minute)
-    {
-      draw = true;
-      last_minute = cur_minute;
-    }
+    force_update = true;
+    last_minute = cur_minute;
   }
 
-  if (draw)
+  if (force_update)
   {
     char buf[6];
 
@@ -800,13 +804,12 @@ static void draw_enable_status(const bool enabled)
 
 static void show_transmit_status(void)
 {
-  refresh_screen = true;
-  draw_clock();
+  draw_clock(false);
 }
 
-static void show_status_screen(void)
+static void show_status_screen(bool force_update)
 {
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     ssd1306_setFixedFont(ssd1306xled_font6x8);
@@ -817,14 +820,14 @@ static void show_status_screen(void)
   ssd1306_setFixedFont(ssd1306xled_font6x8);
   ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
 
-  draw_clock();
+  draw_clock(force_update);
   draw_gps_symbol();
-  draw_battery();
+  draw_battery(force_update);
 
   display_frequency(mode_params[cur_mode].freqs[cur_band]);
 }
 
-static void show_set_mode_screen(void)
+static void show_set_mode_screen(bool force_update)
 {
   int8_t value = get_new_value();
 
@@ -846,10 +849,10 @@ static void show_set_mode_screen(void)
       }
       cur_mode--;
     }
-    refresh_screen = true;
+    force_update = false;
   }
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Mode");
@@ -858,7 +861,7 @@ static void show_set_mode_screen(void)
   display_mode(mode_params[cur_mode].mode_name);
 }
 
-static void show_set_frequency_screen(void)
+static void show_set_frequency_screen(bool force_update)
 {
   int8_t value = get_new_value();
 
@@ -880,10 +883,10 @@ static void show_set_frequency_screen(void)
       }
       cur_band--;
     }
-    refresh_screen = true;
+    force_update = false;
   }
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Frequency");
@@ -892,7 +895,7 @@ static void show_set_frequency_screen(void)
   display_frequency(mode_params[cur_mode].freqs[cur_band]);
 }
 
-static void show_set_output_power(void)
+static void show_set_output_power(bool force_update)
 {
   int8_t value = get_new_value();
 
@@ -912,10 +915,10 @@ static void show_set_output_power(void)
         output_power[cur_band]--;
       }
     }
-    refresh_screen = true;
+    force_update = false;
   }
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Output power");
@@ -924,7 +927,7 @@ static void show_set_output_power(void)
   display_output_power(output_power[cur_band]);
 }
 
-static void show_gps_status_screen(void)
+static void show_gps_status_screen(bool force_update)
 {
   int Year;
   byte Month, Day, Hour, Minute, Second;
@@ -932,7 +935,7 @@ static void show_gps_status_screen(void)
   unsigned long age;
   char buf[21];
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("GPS Status");
@@ -967,8 +970,7 @@ static void show_gps_status_screen(void)
 
 static void show_calbration_status(void)
 {
-  refresh_screen = true;
-  draw_clock();
+  draw_clock(false);
 
   ssd1306_negativeMode();
   ssd1306_setFixedFont(ssd1306xled_font8x16);
@@ -1020,11 +1022,11 @@ static void show_gps_acquisition_progress(void)
   }
 }
 
-static void show_calibration_screen(void)
+static void show_calibration_screen(bool force_update)
 {
   get_new_value();
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Calibration");
@@ -1047,7 +1049,7 @@ static void show_calibration_screen(void)
     {
       process_gps_sync_message();
 
-      if (refresh_screen == true)
+      if (refresh_screen)
       {
         show_gps_acquisition_progress();
         refresh_screen = false;
@@ -1059,11 +1061,11 @@ static void show_calibration_screen(void)
   }
 }
 
-static void show_transmitter_screen(void)
+static void show_transmitter_screen(bool force_update)
 {
   get_new_value();
 
-  if (refresh_screen == false)
+  if (force_update == false)
   {
     ssd1306_clearScreen();
     display_header("Transmitter");
@@ -1092,9 +1094,9 @@ static void show_transmitter_screen(void)
   }
 }
 
-static void show_version_screen(void)
+static void show_version_screen(bool force_update)
 {
-  if (refresh_screen == false)
+  if (force_update == false)
   {
     ssd1306_clearScreen();
     display_header("Version");
@@ -1103,51 +1105,63 @@ static void show_version_screen(void)
   }
 }
 
+static void show_welcome_screen(void)
+{
+  ssd1306_clearScreen();
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+  ssd1306_printFixed(16,  24, "WSJT Beacon", STYLE_NORMAL); 
+}
+
 static void force_switch_to_status_screen(void)
 {
+  bool force_update = false;
+
   if (cur_screen != SCREEN_STATUS)
   {
     cur_screen = SCREEN_STATUS;
-  }
-  else
-  {
-    refresh_screen = true;
+    force_update = true;
   }
 
-  show_status_screen();
+  show_status_screen(force_update);
 }
 
 static void show_screen(void)
 {
   uint8_t next_screen = get_next_screen();
+  bool force_update = false;
 
-  if ((next_screen != cur_screen) || (refresh_screen == true))
+  if (next_screen != cur_screen)
+  {
+    force_update = true;
+  }
+
+  if ((next_screen != cur_screen) || refresh_screen)
   {
     switch (next_screen)
     {
       case SCREEN_SET_MODE:
-        show_set_mode_screen();
+        show_set_mode_screen(force_update);
         break;
       case SCREEN_SET_FREQUENCY:
-        show_set_frequency_screen();
+        show_set_frequency_screen(force_update);
         break;
       case SCREEN_SET_OUTPUT_POWER:
-        show_set_output_power();
+        show_set_output_power(force_update);
         break;
       case SCREEN_GPS_STATUS:
-        show_gps_status_screen();
+        show_gps_status_screen(force_update);
         break;
       case SCREEN_CALIBRATION:
-        show_calibration_screen();
+        show_calibration_screen(force_update);
         break;
       case SCREEN_TRANSMITTER:
-        show_transmitter_screen();
+        show_transmitter_screen(force_update);
         break;
       case SCREEN_VERSION:
-        show_version_screen();
+        show_version_screen(force_update);
         break;
       default:
-        show_status_screen();
+        show_status_screen(force_update);
         break;
     }
 
@@ -1170,7 +1184,7 @@ void setup()
   DEBUGLN("- SSD1306");
   ssd1306_128x64_i2c_init();
   // ssd1306_setContrast(0x01);
-  ssd1306_clearScreen();
+  show_welcome_screen();
 
   DEBUGLN("- SI5351");
   pinMode(CAL_SIGNAL_PIN, INPUT);
