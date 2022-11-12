@@ -3,7 +3,7 @@
 #include "src/Si5351Arduino/src/si5351.h"
 #include <JTEncode.h>
 #include <int.h>
-#include "src/Time/TimeLib.h"
+#include <DS3231.h>
 #include <TinyGPS.h>
 #include <Encoder.h>
 #include <ssd1306.h>
@@ -14,7 +14,7 @@
 #include "priv_types.h"
 
 #define DEBUG_TRACES     1
-#define DEBUG_GPS_NMEA   1
+// #define DEBUG_GPS_NMEA   1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -29,7 +29,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.0.19"
+#define VERSION_STRING   "v1.1.2"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -67,19 +67,19 @@ const struct mode_param mode_params[MODE_COUNT] {
 Si5351 si5351;
 JTEncode jtencode;
 TinyGPS gps;
+DS3231 ds3231;
 Encoder encoder(ENC_A_PIN, ENC_B_PIN);
 Button encoder_button(ENC_BUTTON_PIN);
-
-char loc[5] = "AA00";
+char loc[5] = "UNKN";
 
 uint8_t cur_band = BAND_20M;
 uint8_t cur_mode = MODE_WSPR;
 uint8_t output_power[BAND_COUNT] = { OUTPUT_POWER_MAX_DBM };
 
-#define DISPLAY_REFRESH_TIME (1000)
+#define TX_CHECK_TIME         (100)
 static uint8_t tx_buffer[255];
 uint8_t cur_screen = SCREEN_COUNT;
-bool refresh_screen = false;
+volatile bool refresh_screen = false;
 
 bool edit_mode = false;
 bool blink_toggle = false;
@@ -92,8 +92,8 @@ bool gps_enabled = false;
 #define CAL_TIMEOUT_SECONDS  (CAL_TIME_SECONDS + 1)
 volatile uint32_t timer0_ovf_counter = 0;
 volatile uint16_t timer0_count = 0;
-volatile uint8_t cal_timeout = CAL_TIMEOUT_SECONDS;
-volatile uint8_t cal_watchdog_last_timout = 0;
+volatile uint8_t cal_counter = CAL_TIMEOUT_SECONDS;
+volatile uint8_t cal_watchdog_last_counter = 0;
 volatile uint8_t cal_watchdog = 0;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
@@ -159,7 +159,7 @@ void calc_grid_square(float lat, float lon)
 
 static void read_config(void)
 {
-  DEBUGLN("Reading EEPROM config");
+  DEBUGLN("Reading config");
 
   cur_mode = EEPROM.read(EEPROM_MODE);
   if (cur_mode > MODE_COUNT)
@@ -194,7 +194,7 @@ static void read_config(void)
 
 static void write_config(void)
 {
-  DEBUGLN("Writing EEPROM config");
+  DEBUGLN("Writing config");
 
   EEPROM.write(EEPROM_MODE, cur_mode);
   EEPROM.write(EEPROM_BAND, cur_band);
@@ -225,10 +225,13 @@ static void turn_off_gps(void)
 
 static void turn_on_gps(void)
 {
-  DEBUGLN("Enabling GPS");
-  Serial1.write(ubxVer, sizeof(ubxVer));
-  gps_enabled = true;
-  delay(1000);
+  if (gps_enabled == false)
+  {
+    DEBUGLN("Enabling GPS");
+    Serial1.write(ubxVer, sizeof(ubxVer));
+    gps_enabled = true;
+    delay(1000);
+  }
 }
 
 static bool is_gps_fixed(void)
@@ -262,7 +265,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   si5351.set_freq(mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT, SI5351_CLK0);
   tx_active = true;
 
-  DEBUGLN("Transmitting TX buffer");
+  DEBUGLN("Starting TX");
 
   display_frequency(mode_params[cur_mode].freqs[cur_band]);
 
@@ -299,7 +302,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   si5351.set_clock_pwr(SI5351_CLK0, 0);
   tx_active = false;
 
-  DEBUGLN("Transmition finished");
+  DEBUGLN("TX finished");
 }
 
 static void set_tx_buffer(uint8_t *tx_buffer)
@@ -367,8 +370,12 @@ static void process_gps_sync_message()
       if (age < 500)
       {
         // Set the Time to the latest GPS reading
-        setTime(Hour, Minute, Second, Day, Month, Year);
-        adjustTime((offset + dstOffset(Day, Month, Year, Hour)) * SECS_PER_HOUR);
+        ds3231.setSecond(Second);
+        ds3231.setMinute(Minute);
+        ds3231.setHour(Hour + offset + dstOffset(Day, Month, Year, Hour));
+        ds3231.setDate(Day);
+        ds3231.setMonth(Month);
+        ds3231.setYear(Year);
       }
     }
   }
@@ -395,16 +402,38 @@ static void init_tca0(const bool cal_mode)
   }
 }
 
-static void pit_interrupt()
+static void init_pit(void)
 {
-  if (cal_timeout < CAL_TIME_SECONDS)
-  {
-    DEBUG("Cal. watchdog: prev/curr=");
-    DEBUG(cal_watchdog_last_timout);
-    DEBUG("/");
-    DEBUGLN(cal_timeout);
+  // Internal 32.768 kHz from OSCULP32K
+  RTC.CLKSEL = RTC_CLKSEL_INT32K_gc;
 
-    if (cal_watchdog_last_timout == cal_timeout)
+  // Periodic Interrupt: enabled
+  RTC.PITINTCTRL = RTC_PI_bm;
+
+  // set pit period off at startup
+  RTC.PITCTRLA = RTC_PERIOD_CYC32768_gc | RTC_PITEN_bm;
+}
+
+static void disable_pit_irq(void)
+{
+  RTC.PITINTCTRL = 0;
+}
+
+static void enable_pit_irq(void)
+{
+  RTC.PITINTCTRL = RTC_PI_bm;
+}
+
+ISR(RTC_PIT_vect)
+{
+  if (cal_counter < CAL_TIME_SECONDS)
+  {
+    DEBUG("Cal. watchdog: prev/cur=");
+    DEBUG(cal_watchdog_last_counter);
+    DEBUG("/");
+    DEBUGLN(cal_counter);
+
+    if (cal_watchdog_last_counter == cal_counter)
     {
       cal_watchdog++;
     }
@@ -417,29 +446,33 @@ static void pit_interrupt()
     {
       // Timeout
       DEBUGLN("Lost GPS!");
-      cal_timeout = CAL_TIMEOUT_SECONDS;
+      cal_counter = CAL_TIMEOUT_SECONDS;
       init_tca0(false);
     }
 
-    cal_watchdog_last_timout = cal_timeout;
+    cal_watchdog_last_counter = cal_counter;
   }
+
+  refresh_screen = true;
+
+  RTC.PITINTFLAGS = RTC_PI_bm;
 }
 
 static void pps_interrupt()
 {
-  if (cal_timeout == 0)
+  if (cal_counter == 0)
   {
     init_tca0(true);
     timer0_ovf_counter = 0;
   }
-  else if (cal_timeout == CAL_TIME_SECONDS)
+  else if (cal_counter == CAL_TIME_SECONDS)
   {
     timer0_count = TCA0.SINGLE.CNT;
     init_tca0(false);
   }
-  if (cal_timeout < CAL_TIMEOUT_SECONDS)
+  if (cal_counter < CAL_TIMEOUT_SECONDS)
   {
-    cal_timeout++;
+    cal_counter++;
   }
 }
 
@@ -457,33 +490,33 @@ static void init_evsys(void)
 
 static void calibration(cal_refresh_cb cb)
 {
-  uint8_t prev_cal_timeout = CAL_TIMEOUT_SECONDS;
-  cal_watchdog_last_timout = CAL_TIMEOUT_SECONDS;
+  uint8_t prev_cal_counter = CAL_TIMEOUT_SECONDS;
+  cal_watchdog_last_counter = CAL_TIMEOUT_SECONDS;
 
-  DEBUGLN("Calibration started...");
+  DEBUGLN("Cal. started");
 
-  cal_timeout = 0;
+  cal_counter = 0;
   cal_watchdog = 0;
 
   do {
-    if (prev_cal_timeout != cal_timeout)
+    if (prev_cal_counter != cal_counter)
     {
       if (cb != NULL)
       {
         (*cb)();
       }
     }
-    prev_cal_timeout = cal_timeout;
-  } while (cal_timeout < CAL_TIMEOUT_SECONDS);
+    prev_cal_counter = cal_counter;
+  } while (cal_counter < CAL_TIMEOUT_SECONDS);
 
   uint32_t pulse_count = ((timer0_ovf_counter * 0x10000) + timer0_count);
   int32_t pulse_diff = pulse_count - (CAL_FREQ * CAL_TIME_SECONDS);
   int32_t new_cal_factor = cal_factor + (pulse_diff * 10UL);
 
-  DEBUG("Measured frequency: ");
+  DEBUG("Cal. freq.: ");
   DEBUG((float)(pulse_count / CAL_TIME_SECONDS));
   DEBUGLN("Hz");
-  DEBUG("New calibration factor: ");
+  DEBUG("Cal. factor: ");
   DEBUGLN(new_cal_factor);
 
   if ((new_cal_factor < 1000000) && (new_cal_factor > -1000000))
@@ -572,6 +605,7 @@ static uint8_t get_next_screen(void)
 
   if (next_screen == SCREEN_COUNT)
   {
+    refresh_screen = false;
     return SCREEN_STATUS;
   }
 
@@ -679,7 +713,7 @@ static void draw_gps_symbol(void)
   }
 }
 
-static void draw_battery(void)
+static void draw_battery(bool force_update)
 {
   static uint8_t last_bars = 0xFF;
   uint8_t cur_bars = 0;
@@ -707,7 +741,7 @@ static void draw_battery(void)
     cur_bars = 0;
   }
 
-  if ((last_bars != cur_bars) || (refresh_screen == false))
+  if ((last_bars != cur_bars) || (force_update))
   {
     ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
@@ -720,30 +754,31 @@ static void draw_battery(void)
   }
 }
 
-static void draw_clock(void)
+static void draw_clock(bool force_update)
 {
   static uint8_t last_minute = 0xFF;
-  uint8_t cur_minute = minute();
-  bool draw = false;
+  bool h12 = false, PM_time = false;
+  uint8_t cur_minute = ds3231.getMinute();
+  uint8_t cur_hour = ds3231.getHour(h12, PM_time);
 
-  if (refresh_screen == false)
+  if (last_minute != cur_minute)
   {
-    draw = true;
-  }
-  else
-  {
-    if (last_minute != cur_minute)
-    {
-      draw = true;
-      last_minute = cur_minute;
-    }
+    force_update = true;
+    last_minute = cur_minute;
   }
 
-  if (draw)
+  if (force_update)
   {
     char buf[6];
 
-    sprintf(buf, "%02u:%02u", hour(), cur_minute);
+    if ((cur_hour > 24) || (cur_minute > 59))
+    {
+      sprintf(buf, "--:--");
+    }
+    else
+    {
+      sprintf(buf, "%02u:%02u", cur_hour, cur_minute);      
+    }
 
     DEBUG("Time: ");
     DEBUGLN(buf);
@@ -769,13 +804,12 @@ static void draw_enable_status(const bool enabled)
 
 static void show_transmit_status(void)
 {
-  refresh_screen = true;
-  draw_clock();
+  draw_clock(false);
 }
 
-static void show_status_screen(void)
+static void show_status_screen(bool force_update)
 {
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     ssd1306_setFixedFont(ssd1306xled_font6x8);
@@ -786,14 +820,14 @@ static void show_status_screen(void)
   ssd1306_setFixedFont(ssd1306xled_font6x8);
   ssd1306_printFixed(104, 56, loc, STYLE_NORMAL);
 
-  draw_clock();
+  draw_clock(force_update);
   draw_gps_symbol();
-  draw_battery();
+  draw_battery(force_update);
 
   display_frequency(mode_params[cur_mode].freqs[cur_band]);
 }
 
-static void show_set_mode_screen(void)
+static void show_set_mode_screen(bool force_update)
 {
   int8_t value = get_new_value();
 
@@ -815,10 +849,10 @@ static void show_set_mode_screen(void)
       }
       cur_mode--;
     }
-    refresh_screen = true;
+    force_update = false;
   }
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Mode");
@@ -827,7 +861,7 @@ static void show_set_mode_screen(void)
   display_mode(mode_params[cur_mode].mode_name);
 }
 
-static void show_set_frequency_screen(void)
+static void show_set_frequency_screen(bool force_update)
 {
   int8_t value = get_new_value();
 
@@ -849,10 +883,10 @@ static void show_set_frequency_screen(void)
       }
       cur_band--;
     }
-    refresh_screen = true;
+    force_update = false;
   }
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Frequency");
@@ -861,7 +895,7 @@ static void show_set_frequency_screen(void)
   display_frequency(mode_params[cur_mode].freqs[cur_band]);
 }
 
-static void show_set_output_power(void)
+static void show_set_output_power(bool force_update)
 {
   int8_t value = get_new_value();
 
@@ -881,10 +915,10 @@ static void show_set_output_power(void)
         output_power[cur_band]--;
       }
     }
-    refresh_screen = true;
+    force_update = false;
   }
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Output power");
@@ -893,7 +927,7 @@ static void show_set_output_power(void)
   display_output_power(output_power[cur_band]);
 }
 
-static void show_gps_status_screen(void)
+static void show_gps_status_screen(bool force_update)
 {
   int Year;
   byte Month, Day, Hour, Minute, Second;
@@ -901,7 +935,7 @@ static void show_gps_status_screen(void)
   unsigned long age;
   char buf[21];
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("GPS Status");
@@ -936,8 +970,7 @@ static void show_gps_status_screen(void)
 
 static void show_calbration_status(void)
 {
-  refresh_screen = true;
-  draw_clock();
+  draw_clock(false);
 
   ssd1306_negativeMode();
   ssd1306_setFixedFont(ssd1306xled_font8x16);
@@ -989,11 +1022,11 @@ static void show_gps_acquisition_progress(void)
   }
 }
 
-static void show_calibration_screen(void)
+static void show_calibration_screen(bool force_update)
 {
   get_new_value();
 
-  if (refresh_screen == false)
+  if (force_update)
   {
     ssd1306_clearScreen();
     display_header("Calibration");
@@ -1009,8 +1042,6 @@ static void show_calibration_screen(void)
   }
   else
   {
-    uint32_t last_update = millis();
-
     si5351.set_clock_pwr(SI5351_CLK2, 1);
     turn_on_gps();
 
@@ -1018,10 +1049,10 @@ static void show_calibration_screen(void)
     {
       process_gps_sync_message();
 
-      if ((millis() - last_update) > DISPLAY_REFRESH_TIME)
+      if (refresh_screen)
       {
         show_gps_acquisition_progress();
-        last_update = millis();
+        refresh_screen = false;
       }
     }
 
@@ -1030,11 +1061,11 @@ static void show_calibration_screen(void)
   }
 }
 
-static void show_transmitter_screen(void)
+static void show_transmitter_screen(bool force_update)
 {
   get_new_value();
 
-  if (refresh_screen == false)
+  if (force_update == false)
   {
     ssd1306_clearScreen();
     display_header("Transmitter");
@@ -1063,9 +1094,9 @@ static void show_transmitter_screen(void)
   }
 }
 
-static void show_version_screen(void)
+static void show_version_screen(bool force_update)
 {
-  if (refresh_screen == false)
+  if (force_update == false)
   {
     ssd1306_clearScreen();
     display_header("Version");
@@ -1074,51 +1105,63 @@ static void show_version_screen(void)
   }
 }
 
+static void show_welcome_screen(void)
+{
+  ssd1306_clearScreen();
+  ssd1306_setFixedFont(ssd1306xled_font8x16);
+  ssd1306_printFixed(16,  24, "WSJT Beacon", STYLE_NORMAL); 
+}
+
 static void force_switch_to_status_screen(void)
 {
+  bool force_update = false;
+
   if (cur_screen != SCREEN_STATUS)
   {
     cur_screen = SCREEN_STATUS;
-  }
-  else
-  {
-    refresh_screen = true;
+    force_update = true;
   }
 
-  show_status_screen();
+  show_status_screen(force_update);
 }
 
 static void show_screen(void)
 {
   uint8_t next_screen = get_next_screen();
+  bool force_update = false;
 
-  if ((next_screen != cur_screen) || (refresh_screen == true))
+  if (next_screen != cur_screen)
+  {
+    force_update = true;
+  }
+
+  if ((next_screen != cur_screen) || refresh_screen)
   {
     switch (next_screen)
     {
       case SCREEN_SET_MODE:
-        show_set_mode_screen();
+        show_set_mode_screen(force_update);
         break;
       case SCREEN_SET_FREQUENCY:
-        show_set_frequency_screen();
+        show_set_frequency_screen(force_update);
         break;
       case SCREEN_SET_OUTPUT_POWER:
-        show_set_output_power();
+        show_set_output_power(force_update);
         break;
       case SCREEN_GPS_STATUS:
-        show_gps_status_screen();
+        show_gps_status_screen(force_update);
         break;
       case SCREEN_CALIBRATION:
-        show_calibration_screen();
+        show_calibration_screen(force_update);
         break;
       case SCREEN_TRANSMITTER:
-        show_transmitter_screen();
+        show_transmitter_screen(force_update);
         break;
       case SCREEN_VERSION:
-        show_version_screen();
+        show_version_screen(force_update);
         break;
       default:
-        show_status_screen();
+        show_status_screen(force_update);
         break;
     }
 
@@ -1141,7 +1184,7 @@ void setup()
   DEBUGLN("- SSD1306");
   ssd1306_128x64_i2c_init();
   // ssd1306_setContrast(0x01);
-  ssd1306_clearScreen();
+  show_welcome_screen();
 
   DEBUGLN("- SI5351");
   pinMode(CAL_SIGNAL_PIN, INPUT);
@@ -1163,9 +1206,12 @@ void setup()
   encoder_button.begin();
 
   DEBUGLN("- Timer");
+  init_pit();
   init_evsys();
   init_tca0(false);
-  InternalRTC.attachInterrupt(pit_interrupt);
+
+  DEBUGLN("- DS3231");
+  ds3231.setClockMode(false);
 
   DEBUGLN("- ADC");
   analogReference(INTERNAL1V1);
@@ -1179,42 +1225,25 @@ void setup()
 void loop()
 {
   static uint32_t last_update = 0;
-  static timeStatus_t last_time_status = timeNotSet;
-  timeStatus_t time_status = timeStatus();
 
   process_gps_sync_message();
 
-  if (time_status != last_time_status)
+  if (is_gps_fixed() && (cal_factor_valid == false))
   {
-    switch (time_status)
-    {
-      case timeSet:
-        {
-          float lat, lon;
+    float lat, lon;
 
-          gps.f_get_position(&lat, &lon);
-          calc_grid_square(lat, lon);
+    gps.f_get_position(&lat, &lon);
+    calc_grid_square(lat, lon);
 
-          set_tx_buffer(tx_buffer);
+    set_tx_buffer(tx_buffer);
 
-          if (cal_factor_valid == false)
-          {
-            force_switch_to_status_screen();
-            calibration(show_calbration_status);
-          }
-        }
-        break;
-
-      default:
-        break;
-    }
-
-    last_time_status = time_status;
+    force_switch_to_status_screen();
+    calibration(show_calbration_status);
   }
 
-  if (time_status != timeNotSet)
+  if ((cal_factor_valid) && ((millis() - last_update) > TX_CHECK_TIME))
   {
-    switch (minute())
+    switch (ds3231.getMinute())
     {
       case  0:
       case 10:
@@ -1223,7 +1252,7 @@ void loop()
       case 40:
       case 50:
         {
-          if (second() == mode_params[cur_mode].start_time)
+          if (ds3231.getSecond() == mode_params[cur_mode].start_time)
           {
             force_switch_to_status_screen();
             encode(tx_buffer, show_transmit_status);
@@ -1234,7 +1263,7 @@ void loop()
       case 13:
       case 43:
         {
-          if (second() == 0)
+          if (ds3231.getSecond() == 0)
           {
             si5351.set_clock_pwr(SI5351_CLK2, 1);
             turn_on_gps();
@@ -1245,7 +1274,7 @@ void loop()
       case 15:
       case 45:
         {
-          if (second() == 0)
+          if (ds3231.getSecond() == 0)
           {
             if (is_gps_fixed())
             {
@@ -1264,13 +1293,9 @@ void loop()
       default:
         break;
     }
+
+    last_update = millis();
   }
 
   show_screen();
-
-  if ((millis() - last_update) > DISPLAY_REFRESH_TIME)
-  {
-    refresh_screen = true;
-    last_update = millis();
-  }
 }
