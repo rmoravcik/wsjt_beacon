@@ -29,7 +29,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.1.2"
+#define VERSION_STRING   "v1.1.3"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -586,7 +586,7 @@ static void display_frequency(const uint32_t value)
   uint16_t freq2 = (value / 100) % 1000;
   char text[16];
 
-  sprintf(text, " %3d.%04d MHz  ", freq1, freq2);
+  sprintf(text, " %3d.%04d MHz ", freq1, freq2);
   display_variable(8, 24, text);
 }
 
@@ -1065,7 +1065,7 @@ static void show_transmitter_screen(bool force_update)
 {
   get_new_value();
 
-  if (force_update == false)
+  if (force_update == true)
   {
     ssd1306_clearScreen();
     display_header("Transmitter");
@@ -1096,7 +1096,7 @@ static void show_transmitter_screen(bool force_update)
 
 static void show_version_screen(bool force_update)
 {
-  if (force_update == false)
+  if (force_update == true)
   {
     ssd1306_clearScreen();
     display_header("Version");
