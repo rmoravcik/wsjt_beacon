@@ -739,10 +739,10 @@ static uint8_t get_battery_level(void)
 
 static void draw_battery(bool force_update)
 {
-  static uint8_t last_level = 0xFF;
+  static uint8_t last_level = 0;
   static uint8_t level_filter[3];
   static uint8_t filter_index = 0;
-  uint8_t cur_level;
+  uint8_t cur_level = last_level;
 
   level_filter[filter_index++] = get_battery_level();
   if (filter_index == 3)
@@ -750,12 +750,15 @@ static void draw_battery(bool force_update)
     filter_index = 0;
   }
 
-  cur_level = level_filter[0];
-  for (uint8_t i = 1; i < 3; i++)
+  if (!force_update)
   {
-    if (cur_level != level_filter[i])
+    cur_level = level_filter[0];
+    for (uint8_t i = 1; i < 3; i++)
     {
-      return;
+      if (cur_level != level_filter[i])
+      {
+        return;
+      }
     }
   }
 
