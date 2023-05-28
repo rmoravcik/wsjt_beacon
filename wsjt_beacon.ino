@@ -29,7 +29,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.1.3"
+#define VERSION_STRING   "v1.1.4"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -713,44 +713,65 @@ static void draw_gps_symbol(void)
   }
 }
 
-static void draw_battery(bool force_update)
+static uint8_t get_battery_level(void)
 {
-  static uint8_t last_bars = 0xFF;
-  uint8_t cur_bars = 0;
-
   int16_t raw = analogRead(BATTERY_PIN);
 
   if (raw >= 930)
   {
-    cur_bars = 4;
+    return 4;
   }
   else if (raw >= 906)
   {
-    cur_bars = 3;
+    return 3;
   }
   else if (raw >= 860)
   {
-    cur_bars = 2;
+    return 2;
   }
   else if (raw >= 815)
   {
-    cur_bars = 1;
-  }
-  else
-  {
-    cur_bars = 0;
+    return 1;
   }
 
-  if ((last_bars != cur_bars) || (force_update))
+  return 0;
+}
+
+static void draw_battery(bool force_update)
+{
+  static uint8_t last_level = 0;
+  static uint8_t level_filter[3];
+  static uint8_t filter_index = 0;
+  uint8_t cur_level = last_level;
+
+  level_filter[filter_index++] = get_battery_level();
+  if (filter_index == 3)
+  {
+    filter_index = 0;
+  }
+
+  if (!force_update)
+  {
+    cur_level = level_filter[0];
+    for (uint8_t i = 1; i < 3; i++)
+    {
+      if (cur_level != level_filter[i])
+      {
+        return;
+      }
+    }
+  }
+
+  if ((last_level != cur_level) || (force_update))
   {
     ssd1306_drawBuffer(110, 0, 17, 8, battery_icon);
 
-    for (uint8_t i = 0; i < cur_bars; i++)
+    for (uint8_t i = 0; i < cur_level; i++)
     {
       ssd1306_drawBuffer(112 + (i * 3), 0, 2, 8, battery_bar);
     }
 
-    last_bars = cur_bars;
+    last_level = cur_level;
   }
 }
 
@@ -794,11 +815,11 @@ static void draw_enable_status(const bool enabled)
 
   if (enabled == false)
   {
-    ssd1306_printFixed(40,  24, "Enable ", STYLE_NORMAL);
+    ssd1306_printFixed(32,  24, "Disabled", STYLE_NORMAL);
   }
   else
   {
-    ssd1306_printFixed(40,  24, "Disable", STYLE_NORMAL);
+    ssd1306_printFixed(32,  24, "Enabled ", STYLE_NORMAL);
   }
 }
 
