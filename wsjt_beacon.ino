@@ -13,8 +13,9 @@
 #include "config.h"
 #include "priv_types.h"
 
-#define DEBUG_TRACES     1
+// #define DEBUG_TRACES     1
 // #define DEBUG_GPS_NMEA   1
+// #define TX_DEBUG_MODE    1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -29,7 +30,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.1.4"
+#define VERSION_STRING   "v1.1.5"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -1247,6 +1248,14 @@ void loop()
 {
   static uint32_t last_update = 0;
 
+#ifdef TX_DEBUG_MODE
+  cal_factor_valid = true;
+  loc[0] = 'J';
+  loc[1] = 'O';
+  loc[2] = '7';
+  loc[3] = '0';
+#endif
+
   process_gps_sync_message();
 
   if (is_gps_fixed() && (cal_factor_valid == false))
@@ -1264,6 +1273,14 @@ void loop()
 
   if ((cal_factor_valid) && ((millis() - last_update) > TX_CHECK_TIME))
   {
+#ifdef TX_DEBUG_MODE
+    if (((ds3231.getMinute() % 2) == 0) && (ds3231.getSecond() == mode_params[cur_mode].start_time))
+    {
+      set_tx_buffer(tx_buffer);
+      force_switch_to_status_screen();
+      encode(tx_buffer, show_transmit_status);
+    }
+#else
     switch (ds3231.getMinute())
     {
       case  0:
@@ -1314,6 +1331,7 @@ void loop()
       default:
         break;
     }
+#endif
 
     last_update = millis();
   }
