@@ -16,6 +16,7 @@
 // #define DEBUG_TRACES     1
 // #define DEBUG_GPS_NMEA   1
 // #define TX_DEBUG_MODE    1
+// #define TX_CPU_DELAY     1
 
 #if DEBUG_TRACES
 #define DEBUG(x)    Serial.print(x)
@@ -282,12 +283,14 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
     }
   */
 
+#ifndef TX_CPU_DELAY
   TCA0.SINGLE.CMP0 = mode_params[cur_mode].tone_delay * 25;
+#endif
 
   for (i = 0; i < mode_params[cur_mode].symbol_count; i++)
   {
     si5351.set_freq((mode_params[cur_mode].freqs[cur_band] * SI5351_FREQ_MULT) + (tx_buffer[i] * mode_params[cur_mode].tone_spacing), SI5351_CLK0);
-
+#ifndef TX_CPU_DELAY
     // Wait for timer expire
     TCA0.SINGLE.CNT = 0;
     tx_timeout = 10;
@@ -297,6 +300,9 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
       cb();
     }
     while (tx_timeout > 0) {};
+#else
+    delay(mode_params[cur_mode].tone_delay);
+#endif
   }
 
   // Turn off the output
@@ -1230,7 +1236,9 @@ void setup()
   DEBUGLN("- Timer");
   init_pit();
   init_evsys();
+#ifndef TX_CPU_DELAY
   init_tca0(false);
+#endif
 
   DEBUGLN("- DS3231");
   ds3231.setClockMode(false);
