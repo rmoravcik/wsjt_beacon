@@ -31,7 +31,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.1.5"
+#define VERSION_STRING   "v1.1.6"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -111,7 +111,7 @@ typedef void (*cal_refresh_cb)(void);
    - http://www.uniquevisitor.it/magazine/ora-legale-italia.php
    - http://www.calendario-365.it/ora-legale-orario-invernale.html
 */
-byte dstOffset (byte d, byte m, unsigned int y, byte h) {
+static byte dstOffset (byte d, byte m, unsigned int y, byte h) {
   // Day in March that DST starts on, at 1 am
   byte dstOn = (31 - (5 * y / 4 + 4) % 7);
 
@@ -127,7 +127,7 @@ byte dstOffset (byte d, byte m, unsigned int y, byte h) {
 }
 
 // Overtaken from https://github.com/W3PM/GPS-Display-and-Time-Grid-Square-Synchronization-Source/blob/master/GPS_display_source_v2_4a.ino
-void calc_grid_square(float lat, float lon)
+static void calc_grid_square(float lat, float lon)
 {
   int o1, o2; //, o3;
   int a1, a2; //, a3;
