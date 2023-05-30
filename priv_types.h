@@ -113,4 +113,6 @@ const uint32_t ft8_freqs[BAND_COUNT] = {
 #define OUTPUT_POWER_MIN_DBM  (0U)
 #define OUTPUT_POWER_MAX_DBM (30U)
 
+typedef void (*cal_refresh_cb)(void);
+
 #endif /* _PRIV_TYPES_H_ */

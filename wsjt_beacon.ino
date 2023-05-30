@@ -100,8 +100,6 @@ volatile uint8_t cal_watchdog = 0;
 static int32_t cal_factor = 0;
 static bool cal_factor_valid = false;
 
-typedef void (*cal_refresh_cb)(void);
-
 /* This function returns the DST offset for the current UTC time.
    This is valid for the EU, for other places see
    http://www.webexhibits.org/daylightsaving/i.html
@@ -111,7 +109,7 @@ typedef void (*cal_refresh_cb)(void);
    - http://www.uniquevisitor.it/magazine/ora-legale-italia.php
    - http://www.calendario-365.it/ora-legale-orario-invernale.html
 */
-static byte dstOffset (byte d, byte m, unsigned int y, byte h) {
+static byte dstOffset (const byte d, const byte m, const unsigned int y, const byte h) {
   // Day in March that DST starts on, at 1 am
   byte dstOn = (31 - (5 * y / 4 + 4) % 7);
 
@@ -127,7 +125,7 @@ static byte dstOffset (byte d, byte m, unsigned int y, byte h) {
 }
 
 // Overtaken from https://github.com/W3PM/GPS-Display-and-Time-Grid-Square-Synchronization-Source/blob/master/GPS_display_source_v2_4a.ino
-static void calc_grid_square(float lat, float lon)
+static void calc_grid_square(const float lat, const float lon)
 {
   int o1, o2; //, o3;
   int a1, a2; //, a3;
@@ -258,7 +256,7 @@ ISR(TCA0_CMP0_vect)
 }
 
 // Loop through the string, transmitting one character at a time.
-static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
+static void encode(cal_refresh_cb cb)
 {
   uint8_t i;
 
@@ -312,7 +310,7 @@ static void encode(uint8_t *tx_buffer, cal_refresh_cb cb)
   DEBUGLN("TX finished");
 }
 
-static void set_tx_buffer(uint8_t *tx_buffer)
+static void set_tx_buffer(void)
 {
   char message[14];
 
@@ -321,7 +319,7 @@ static void set_tx_buffer(uint8_t *tx_buffer)
   sprintf(message, "%s %s", call, loc);
 
   // Clear out the transmit buffer
-  memset(tx_buffer, 0, 255);
+  memset(tx_buffer, 0, sizeof(tx_buffer));
 
   // Set the proper frequency and timer CTC depending on mode
   switch (cur_mode)
@@ -661,6 +659,7 @@ static int8_t get_new_value(void)
     if (encoder_button.pressed())
     {
       DEBUGLN("Leaving edit mode");
+      set_tx_buffer();
       write_config();
       edit_mode = false;
       blink_toggle = false;
@@ -1274,7 +1273,7 @@ void loop()
     gps.f_get_position(&lat, &lon);
     calc_grid_square(lat, lon);
 
-    set_tx_buffer(tx_buffer);
+    set_tx_buffer();
 
     force_switch_to_status_screen();
     calibration(show_calbration_status);
@@ -1285,9 +1284,9 @@ void loop()
 #ifdef TX_DEBUG_MODE
     if (((ds3231.getMinute() % 2) == 0) && (ds3231.getSecond() == mode_params[cur_mode].start_time))
     {
-      set_tx_buffer(tx_buffer);
+      set_tx_buffer();
       force_switch_to_status_screen();
-      encode(tx_buffer, show_transmit_status);
+      encode(show_transmit_status);
     }
 #else
     switch (ds3231.getMinute())
@@ -1302,7 +1301,7 @@ void loop()
           if (ds3231.getSecond() == mode_params[cur_mode].start_time)
           {
             force_switch_to_status_screen();
-            encode(tx_buffer, show_transmit_status);
+            encode(show_transmit_status);
           }
         }
         break;
