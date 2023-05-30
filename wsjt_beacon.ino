@@ -31,7 +31,7 @@
 #define EEPROM_CAL_FACTOR   (2)
 #define EEPROM_OUTPUT_POWER (6)
 
-#define VERSION_STRING   "v1.1.6"
+#define VERSION_STRING   "v1.1.7"
 
 const uint8_t gps_icon[8] = { 0x3F, 0x62, 0xC4, 0x88, 0x94, 0xAD, 0xC1, 0x87 };
 const uint8_t battery_icon[17] = { 0xFF, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81,
@@ -316,7 +316,7 @@ static void set_tx_buffer(void)
 
   DEBUGLN("Setting TX buffer");
 
-  sprintf(message, "%s %s", call, loc);
+  sprintf(message, "CQ %s %s", call, loc);
 
   // Clear out the transmit buffer
   memset(tx_buffer, 0, sizeof(tx_buffer));
